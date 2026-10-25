@@ -23,3 +23,6 @@ node_modules/
 *.bak*
 .DS_Store
 Thumbs.db
+
+# Mac 用の仮想環境
+.venv/

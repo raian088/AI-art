@@ -1999,6 +1999,7 @@ def open_native_window():
 
 def _fatal_box(title: str, msg: str):
     """致命的エラーをメッセージボックスで表示（--windowed でも見える）。"""
+    print(f"[{title}] {msg}")
     try:
         ctypes.windll.user32.MessageBoxW(0, msg, title, 0x10)  # MB_ICONERROR
     except Exception:
@@ -2018,6 +2019,8 @@ def _main():
     if is_port_in_use(APP_HOST, APP_PORT):
         # ポートが塞がっている = 既存インスタンス or 別アプリが使用中
         _bring_existing_window_to_front()
+        print(f"[ERROR] ポート {APP_PORT} が既に使われています。"
+              + ("（Mac は「AirPlayレシーバー」が 5000 番を使うので OFF にしてください）" if sys.platform == "darwin" else ""))
         try:
             ctypes.windll.user32.MessageBoxW(
                 0,

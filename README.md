@@ -18,7 +18,8 @@ AI-art/
 │   ├── install.bat
 │   └── uninstall.bat
 ├── tools/
-│   └── open_debug_log.bat   # デバッグログ画面を開く
+│   ├── open_debug_log.bat   # デバッグログ画面を開く（Windows）
+│   └── start_mac.command    # Mac 用の起動スクリプト
 ├── docs/
 │   └── LICENSE_AUDIT.md     # ライブラリの商用利用可否の調査
 └── .env.example         # 設定ファイルの見本（コピーして .env にする）
@@ -81,6 +82,24 @@ Windows の **設定 > アプリ > スタートアップ** に「AIお絵描き�
 | `CHROME_PATH` | 自動検出 | Chrome が標準の場所にないときだけ指定 |
 
 起動引数 `--browser` / `--window` で一時的に切り替えもできます。`--delay=10` で起動を10秒遅らせます（自動起動で使用）。
+
+## Mac での起動
+
+Mac でも動かせます（展示用の本番は Windows を想定しています）。
+
+1. Google Chrome と Python 3（https://www.python.org/ ）をインストール
+2. **AirPlay レシーバーを OFF**：システム設定 > 一般 > AirDrop と Handoff > AirPlay レシーバー
+   （Mac はこの機能が 5000 番ポートを使うため、ONのままだと起動できません）
+3. `tools/start_mac.command` をダブルクリック
+   - 初回は `.env` が作られるので APIキーを書いて保存 → もう一度ダブルクリック
+   - 初回はライブラリのインストールに少し時間がかかります
+   - 「開発元を確認できません」と出たら、右クリック >「開く」で起動
+
+Mac での違い：
+
+- **印刷はできません**（Windows のプリンター機能を使っているため）
+- Cmd+Tab・Cmd+Q などのキー制限はありません（Cmd+Q で閉じても Chrome は自動で開き直します）
+- 終了は管理画面の「AIソフトを閉じる」、またはターミナルで Ctrl+C
 
 ## 開発時の起動
 

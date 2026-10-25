@@ -41,6 +41,11 @@ def find_chrome(custom_path: str = "") -> str:
                     pass
         except Exception:
             pass
+    # Mac
+    cands += [
+        "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome",
+        os.path.expanduser("~/Applications/Google Chrome.app/Contents/MacOS/Google Chrome"),
+    ]
     for c in cands:
         if c and os.path.isfile(c):
             return c
@@ -55,7 +60,8 @@ def find_edge() -> str:
             p = os.path.join(base, "Microsoft", "Edge", "Application", "msedge.exe")
             if os.path.isfile(p):
                 return p
-    return ""
+    mac = "/Applications/Microsoft Edge.app/Contents/MacOS/Microsoft Edge"
+    return mac if os.path.isfile(mac) else ""
 
 
 # ==========================================
