@@ -1,3 +1,4 @@
+from __future__ import annotations  # Python 3.9（Mac 標準）でも動くように
 import os
 import sys
 import io

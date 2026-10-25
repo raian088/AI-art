@@ -7,6 +7,7 @@
 - Chrome が前面にある間だけ Alt+Tab / Alt+F4 / Ctrl+W などのショートカットを無効化する
   （Windows キーはそのまま使える。Ctrl+Alt+Del は OS の仕様上ブロックできない）
 """
+from __future__ import annotations  # Python 3.9（Mac 標準）でも動くように
 import json
 import os
 import subprocess
