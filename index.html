@@ -1,0 +1,2741 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>AI お絵描き</title>
+<style>
+  @import url('https://fonts.googleapis.com/css2?family=Zen+Maru+Gothic:wght@400;700;900&display=swap');
+
+  *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+  /* ===== フリガナ（ruby）の共通スタイル ===== */
+  ruby { ruby-position: over; }
+  ruby rt {
+    font-size: 0.5em;
+    color: rgba(0, 0, 0, 0.55);
+    font-weight: 700;
+    letter-spacing: 0;
+    line-height: 1;
+  }
+  /* 暗い背景の上のフリガナは白系に */
+  #status-bar ruby rt,
+  #voice-status ruby rt,
+  #fs-toast ruby rt {
+    color: rgba(255, 255, 255, 0.85);
+  }
+  header h1 ruby rt { color: rgba(255, 107, 53, 0.7); }
+  #draw-btn ruby rt { color: rgba(255, 255, 255, 0.85); }
+  #print-big-btn ruby rt,
+  .btn-restart ruby rt,
+  .voice-btn ruby rt { color: rgba(255, 255, 255, 0.85); }
+
+  :root {
+    --bg: #fff5e6;
+    --surface: #ffffff;
+    --border: #ffd699;
+    --text: #2d2d2d;
+    --muted: #888;
+    --accent: #ff6b35;
+    --accent-fg: #ffffff;
+    --green: #4CAF50;
+    --red: #e53935;
+  }
+
+  body {
+    font-family: 'Zen Maru Gothic', 'Hiragino Kaku Gothic ProN', 'Noto Sans JP', sans-serif;
+    background: var(--bg);
+    color: var(--text);
+    height: 100vh;
+    display: flex;
+    flex-direction: column;
+    overflow: hidden;
+  }
+
+  header {
+    text-align: center;
+    padding: 12px 24px;
+    background: var(--surface);
+    border-bottom: 3px solid var(--border);
+    box-shadow: 0 2px 10px rgba(0,0,0,0.05);
+    flex-shrink: 0;
+    position: relative;
+  }
+  /* ===== 左上のプロデュース表記（スポンサープレート） ===== */
+  #produced-by {
+    position: absolute;
+    left: 18px;
+    top: 50%;
+    transform: translateY(-50%);
+    display: flex;
+    flex-direction: column;
+    gap: 5px;
+    pointer-events: none;
+    user-select: none;
+    -webkit-user-select: none;
+  }
+  #produced-by .pb-label {
+    font-size: 10px;
+    font-weight: 900;
+    letter-spacing: 0.16em;
+    color: var(--muted);
+    line-height: 1;
+  }
+  #produced-by .pb-logos {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+  }
+  #produced-by img {
+    height: 40px;
+    width: auto;
+    display: block;
+  }
+  /* LuBoロゴは黒地なので、角丸のタイルとして見せる */
+  #produced-by img.pb-tile {
+    border-radius: 6px;
+  }
+  /* 画面が狭いときはタイトルと重なるので隠す */
+  @media (max-width: 900px) {
+    #produced-by { display: none; }
+  }
+
+  header h1 {
+    font-size: 28px;
+    font-weight: 900;
+    color: var(--accent);
+    text-shadow: 2px 2px 4px rgba(0,0,0,0.1);
+    cursor: pointer;
+    user-select: none;
+    -webkit-user-select: none;
+    display: inline-block;
+    position: relative;
+    padding: 4px 12px;
+    border-radius: 10px;
+    transition: background 0.2s;
+  }
+  header h1.pressing {
+    background: rgba(255,107,53,0.1);
+  }
+  /* 長押し進捗バー（タイトル直下） */
+  #fs-progress {
+    position: absolute;
+    left: 0;
+    bottom: -3px;
+    height: 4px;
+    width: 0%;
+    background: linear-gradient(90deg, #ff6b35, #ffd700);
+    border-radius: 2px;
+    transition: width 0.05s linear;
+    pointer-events: none;
+  }
+  /* 全画面トースト */
+  #fs-toast {
+    position: fixed;
+    top: 24px;
+    left: 50%;
+    transform: translateX(-50%);
+    background: rgba(0,0,0,0.85);
+    color: #fff;
+    padding: 14px 28px;
+    border-radius: 999px;
+    font-weight: 900;
+    font-size: 16px;
+    pointer-events: none;
+    opacity: 0;
+    transition: opacity 0.3s;
+    z-index: 2000;
+  }
+  #fs-toast.show { opacity: 1; }
+  header p {
+    font-size: 14px;
+    color: var(--muted);
+    margin-top: 2px;
+  }
+
+  #app {
+    flex: 1;
+    display: flex;
+    flex-direction: column;
+    overflow: hidden;
+  }
+
+  /* キャンバスと右側パネルを横並びにする中央エリア */
+  #main-area {
+    flex: 1;
+    display: flex;
+    flex-direction: row;
+    overflow: hidden;
+    min-height: 0;
+  }
+
+  /* ===== TOOLBAR ===== */
+  #toolbar {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    padding: 12px 16px;
+    border-bottom: 3px solid var(--border);
+    background: linear-gradient(135deg, #fff9f0 0%, #ffe6cc 100%);
+    flex-shrink: 0;
+    flex-wrap: wrap;
+  }
+
+  #prompt-wrap {
+    flex: 1;
+    min-width: 200px;
+    position: relative;
+    display: flex;
+    align-items: center;
+  }
+
+  #prompt {
+    width: 100%;
+    font-size: 18px;
+    padding: 12px 16px;
+    border: 2px solid var(--border);
+    border-radius: 12px;
+    outline: none;
+    background: var(--surface);
+    font-family: inherit;
+    font-weight: 700;
+    transition: border-color 0.2s, box-shadow 0.2s;
+  }
+  #prompt:focus {
+    border-color: var(--accent);
+    box-shadow: 0 0 0 3px rgba(255,107,53,0.15);
+  }
+
+  /* ===== 画面右側の縦並びアクションパネル ===== */
+  #side-panel {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    gap: 24px;
+    padding: 20px 18px;
+    background: linear-gradient(180deg, #fff9f0 0%, #ffe6cc 100%);
+    border-left: 3px solid var(--border);
+    flex-shrink: 0;
+    width: 180px;
+  }
+
+  #mic-btn {
+    width: 130px;
+    height: 130px;
+    border-radius: 50%;
+    border: 4px solid var(--border);
+    background: var(--surface);
+    cursor: pointer;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 64px;
+    transition: all 0.2s;
+    padding: 0;
+    box-shadow: 0 4px 14px rgba(0,0,0,0.15);
+    flex-shrink: 0;
+  }
+  #mic-btn:hover { background: #ffe6cc; transform: scale(1.06); }
+  #mic-btn:active { transform: scale(0.95); }
+  #mic-btn.listening {
+    background: #ffebee;
+    border-color: var(--red);
+    animation: mic-pulse 1s infinite;
+  }
+  @keyframes mic-pulse {
+    0%, 100% { box-shadow: 0 0 0 0 rgba(229,57,53,0.4); }
+    50% { box-shadow: 0 0 0 18px rgba(229,57,53,0); }
+  }
+  /* じゅんびちゅう・文字にしているあいだ（押しても反応しないように見せない） */
+  #mic-btn.connecting {
+    background: #fff3e0;
+    border-color: var(--accent);
+    animation: mic-connecting 1.2s infinite;
+  }
+  @keyframes mic-connecting {
+    0%, 100% { opacity: 1; }
+    50% { opacity: 0.55; }
+  }
+
+  .toolbar-btn {
+    font-size: 15px;
+    font-family: inherit;
+    padding: 12px 20px;
+    border-radius: 12px;
+    border: 2px solid var(--border);
+    cursor: pointer;
+    background: var(--surface);
+    color: var(--text);
+    transition: all 0.2s;
+    white-space: nowrap;
+    font-weight: 700;
+    box-shadow: 0 2px 8px rgba(0,0,0,0.08);
+  }
+  .toolbar-btn:hover {
+    background: #fff5e6;
+    transform: translateY(-2px);
+    box-shadow: 0 4px 12px rgba(0,0,0,0.12);
+  }
+  .toolbar-btn:active { transform: scale(0.95); }
+  .toolbar-btn:disabled { opacity: 0.4; cursor: not-allowed; transform: none; }
+
+  #draw-btn {
+    background: var(--accent);
+    color: var(--accent-fg);
+    border-color: var(--accent);
+    font-size: 28px;
+    padding: 20px 16px;
+    border-radius: 18px;
+    box-shadow: 0 6px 18px rgba(255,107,53,0.4);
+    width: 144px;
+    height: 130px;
+    line-height: 1.2;
+  }
+  #draw-btn:hover { background: #ff5722; border-color: #ff5722; box-shadow: 0 8px 22px rgba(255,107,53,0.5); }
+
+  /* 右側パネルのクリアボタン（マイクと同じ大きさ） */
+  #clear-btn-side {
+    width: 144px;
+    height: 110px;
+    border-radius: 18px;
+    border: 4px solid var(--border);
+    background: var(--surface);
+    color: var(--text);
+    cursor: pointer;
+    font-size: 22px;
+    font-family: inherit;
+    font-weight: 700;
+    line-height: 1.2;
+    transition: all 0.2s;
+    box-shadow: 0 4px 14px rgba(0,0,0,0.12);
+    padding: 0;
+  }
+  #clear-btn-side:hover { background: #fff5e6; transform: translateY(-2px); box-shadow: 0 6px 18px rgba(0,0,0,0.16); }
+  #clear-btn-side:active { transform: scale(0.96); }
+
+  /* 右側パネルの「ー」入力ヘルパーボタン（マイクと同じ円形・大きめ） */
+  #dash-btn {
+    flex-shrink: 0;
+    width: 130px;
+    height: 90px;
+    border-radius: 20px;
+    border: 4px solid var(--border);
+    background: var(--surface);
+    cursor: pointer;
+    font-size: 56px;
+    font-family: inherit;
+    font-weight: 900;
+    color: var(--accent);
+    transition: all 0.15s;
+    box-shadow: 0 4px 14px rgba(0,0,0,0.12);
+    line-height: 1;
+    padding: 0;
+  }
+  #dash-btn:hover { background: #ffe6cc; transform: scale(1.05); }
+  #dash-btn:active { transform: scale(0.94); background: #ffd699; }
+
+  /* ===== CANVAS AREA ===== */
+  #canvas-outer {
+    flex: 1;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    background: #111;
+    overflow: hidden;
+    padding: 10px;
+  }
+
+  /* キャンバスは常に正方形。JSで一辺サイズを決める */
+  #canvas-wrap {
+    position: relative;
+    background: linear-gradient(135deg, #1a1a2e 0%, #16213e 100%);
+    overflow: hidden;
+    flex-shrink: 0;
+    aspect-ratio: 1 / 1;
+    border-radius: 12px;
+  }
+
+  #main-canvas, #anim-canvas {
+    position: absolute;
+    top: 0; left: 0;
+    width: 100%; height: 100%;
+    object-fit: contain; 
+  }
+  #anim-canvas { pointer-events: none; }
+
+  #status-bar {
+    position: absolute;
+    bottom: 20px;
+    left: 50%;
+    transform: translateX(-50%);
+    background: rgba(0,0,0,0.7);
+    color: #fff;
+    border-radius: 999px;
+    padding: 10px 24px;
+    font-size: 16px;
+    font-weight: 700;
+    pointer-events: none;
+    white-space: nowrap;
+    backdrop-filter: blur(8px);
+    transition: opacity 0.3s;
+  }
+
+  #progress-bar {
+    position: absolute;
+    bottom: 0; left: 0;
+    height: 5px;
+    background: linear-gradient(90deg, #ff6b35, #ffd700);
+    width: 0%;
+    transition: width 0.3s;
+  }
+
+  /* ===== エラーオーバーレイ ===== */
+  #error-overlay {
+    position: absolute;
+    inset: 0;
+    display: none;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    background: rgba(0,0,0,0.6);
+    backdrop-filter: blur(4px);
+    z-index: 200;
+    animation: fade-in 0.4s ease;
+  }
+  #error-overlay.show { display: flex; }
+
+  #error-box {
+    background: #ffffff;
+    border-radius: 28px;
+    padding: 40px 48px;
+    text-align: center;
+    box-shadow: 0 20px 60px rgba(0,0,0,0.5);
+    max-width: 440px;
+    width: 90%;
+    border-top: 6px solid var(--red);
+  }
+  #error-emoji { font-size: 60px; display: block; margin-bottom: 12px; }
+  #error-title {
+    font-size: 24px;
+    font-weight: 900;
+    color: var(--red);
+    margin-bottom: 10px;
+  }
+  #error-message {
+    font-size: 14px;
+    color: var(--muted);
+    margin-bottom: 24px;
+    line-height: 1.7;
+    word-break: break-all;
+  }
+  #error-draw-again-btn {
+    display: block;
+    width: 100%;
+    padding: 18px;
+    font-size: 18px;
+    font-weight: 900;
+    font-family: inherit;
+    background: linear-gradient(135deg, #ff6b35, #ff5722);
+    color: #fff;
+    border: none;
+    border-radius: 14px;
+    cursor: pointer;
+    transition: all 0.2s;
+    box-shadow: 0 6px 20px rgba(255,107,53,0.35);
+    margin-bottom: 12px;
+  }
+  #error-draw-again-btn:hover {
+    transform: translateY(-2px);
+    box-shadow: 0 10px 28px rgba(255,107,53,0.5);
+  }
+  #error-retry-btn {
+    display: block;
+    width: 100%;
+    padding: 14px;
+    font-size: 16px;
+    font-weight: 700;
+    font-family: inherit;
+    background: #fff;
+    color: var(--accent);
+    border: 3px solid var(--accent);
+    border-radius: 14px;
+    cursor: pointer;
+    transition: all 0.2s;
+    margin-bottom: 12px;
+  }
+  #error-retry-btn:hover { background: #fff5e6; }
+  #error-reload-btn {
+    display: block;
+    width: 100%;
+    padding: 14px;
+    font-size: 15px;
+    font-weight: 700;
+    font-family: inherit;
+    background: #f5f5f5;
+    color: var(--text);
+    border: 2px solid #ddd;
+    border-radius: 12px;
+    cursor: pointer;
+    transition: all 0.2s;
+  }
+  #error-reload-btn:hover { background: #e8e8e8; }
+
+  /* ===== 印刷後オーバーレイ (5秒後に表示される画面) ===== */
+  #post-print-overlay {
+    position: absolute;
+    inset: 0;
+    display: none; /* toggle with .show */
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    background: rgba(0,0,0,0.5);
+    backdrop-filter: blur(3px);
+    z-index: 150;
+    animation: fade-in 0.5s ease;
+  }
+  #post-print-overlay.show { display: flex; }
+
+  #post-print-box {
+    background: #ffffff;
+    border-radius: 28px;
+    padding: 48px;
+    text-align: center;
+    box-shadow: 0 20px 60px rgba(0,0,0,0.5);
+    max-width: 440px;
+    width: 90%;
+    border-top: 6px solid var(--green);
+  }
+  #post-print-box h2 {
+    font-size: 26px;
+    color: var(--green);
+    margin-bottom: 12px;
+    font-weight: 900;
+  }
+  #post-print-box p {
+    font-size: 16px;
+    color: var(--muted);
+    margin-bottom: 32px;
+    font-weight: 700;
+  }
+  .post-print-btn {
+    display: block;
+    width: 100%;
+    padding: 18px;
+    font-size: 18px;
+    font-weight: 900;
+    font-family: inherit;
+    border-radius: 16px;
+    cursor: pointer;
+    transition: all 0.2s;
+    margin-bottom: 12px;
+    border: none;
+  }
+  .btn-restart {
+    background: linear-gradient(135deg, #4CAF50, #2e7d32);
+    color: #fff;
+    box-shadow: 0 6px 20px rgba(76,175,80,0.4);
+  }
+  .btn-restart:hover { transform: translateY(-2px); box-shadow: 0 10px 28px rgba(76,175,80,0.5); }
+  .btn-view-again {
+    background: #f5f5f5;
+    color: var(--text);
+    border: 3px solid #ddd;
+  }
+  .btn-view-again:hover { background: #e8e8e8; transform: translateY(-2px); }
+
+  @keyframes fade-in {
+    from { opacity: 0; transform: scale(0.95); }
+    to   { opacity: 1; transform: scale(1); }
+  }
+
+  /* ===== INFO BAR (通常時の下のバー) ===== */
+  #info-bar {
+    padding: 16px 22px;
+    border-top: 3px solid var(--border);
+    background: linear-gradient(135deg, #fff9f0 0%, #ffe6cc 100%);
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    flex-wrap: wrap;
+    font-size: 19px;
+    font-weight: 700;
+    flex-shrink: 0;
+  }
+  .tag {
+    background: #fff;
+    border: 3px solid var(--border);
+    border-radius: 14px;
+    padding: 11px 22px;
+    cursor: pointer;
+    font-size: 20px;
+    font-weight: 700;
+    font-family: inherit;
+    transition: all 0.2s;
+    box-shadow: 0 3px 9px rgba(0,0,0,0.08);
+  }
+  .tag:hover {
+    background: #ffe6cc;
+    transform: translateY(-3px);
+    box-shadow: 0 6px 14px rgba(0,0,0,0.12);
+  }
+
+  /* ===== FINISH BAR (完成時に出現する印刷バー) ===== */
+  #finish-bar {
+    padding: 16px 24px;
+    background: var(--surface);
+    border-top: 4px solid var(--green);
+    display: none;
+    align-items: center;
+    gap: 20px;
+    flex-shrink: 0;
+    box-shadow: 0 -4px 15px rgba(0,0,0,0.1);
+    z-index: 10;
+  }
+  #finish-msg {
+    font-size: 22px;
+    font-weight: 900;
+    color: var(--green);
+    flex: 1;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+  }
+  #print-big-btn {
+    padding: 16px 32px;
+    font-size: 22px;
+    font-weight: 900;
+    font-family: inherit;
+    background: linear-gradient(135deg, #4CAF50, #2e7d32);
+    color: #fff;
+    border: none;
+    border-radius: 16px;
+    cursor: pointer;
+    transition: all 0.2s;
+    box-shadow: 0 6px 20px rgba(76,175,80,0.4);
+    min-width: 220px;
+  }
+  #print-big-btn:hover {
+    transform: translateY(-3px);
+    box-shadow: 0 10px 28px rgba(76,175,80,0.5);
+  }
+  #print-big-btn:active { transform: scale(0.97); }
+  #print-big-btn:disabled {
+    opacity: 0.9;
+    cursor: not-allowed;
+    transform: none;
+    background: #4CAF50;
+    box-shadow: none;
+  }
+  #reset-btn {
+    padding: 16px 24px;
+    font-size: 18px;
+    font-weight: 700;
+    font-family: inherit;
+    background: #f5f5f5;
+    color: var(--text);
+    border: 3px solid #ddd;
+    border-radius: 16px;
+    cursor: pointer;
+    transition: all 0.2s;
+  }
+  #reset-btn:hover { background: #e8e8e8; }
+
+  /* ===== CANCEL BUTTON (タイトルバー右) ===== */
+  #cancel-btn {
+    display: none;
+    position: absolute;
+    top: 50%;
+    right: 20px;
+    transform: translateY(-50%);
+    z-index: 30;
+    padding: 10px 22px;
+    font-size: 17px;
+    font-weight: 900;
+    font-family: inherit;
+    background: #fff;
+    color: #e53935;
+    border: 2px solid #e53935;
+    border-radius: 12px;
+    cursor: pointer;
+    transition: background 0.2s, box-shadow 0.2s, transform 0.1s;
+    box-shadow: 0 3px 10px rgba(229,57,53,0.2);
+  }
+  #cancel-btn:hover { background: #ffebee; box-shadow: 0 6px 16px rgba(229,57,53,0.3); }
+  #cancel-btn:active { transform: translateY(-50%) scale(0.96); }
+
+  /* ===== 印刷用 ===== */
+  @media print {
+    @page { margin: 10mm; }
+    body { background: #fff; display: block; overflow: visible; }
+    header, #toolbar, #info-bar, #finish-bar, #status-bar, #progress-bar, #anim-canvas, #start-overlay, #post-print-overlay { display: none !important; }
+    #app, #canvas-outer, #canvas-wrap { box-shadow: none; border: none; display: block; }
+    #canvas-wrap { position: static; width: 100%; height: auto; background: #000; aspect-ratio: auto; }
+    #main-canvas { position: static; width: 100% !important; height: auto !important; display: block; }
+    #print-caption { display: block !important; text-align: center; margin-top: 8mm; font-size: 11pt; color: #444; }
+  }
+  #print-caption { display: none; }
+
+  /* 音声認識状態表示 */
+  #voice-status {
+    position: absolute;
+    top: 16px;
+    left: 50%;
+    transform: translateX(-50%);
+    background: rgba(229,57,53,0.9);
+    color: #fff;
+    border-radius: 999px;
+    padding: 8px 20px;
+    font-size: 15px;
+    font-weight: 700;
+    pointer-events: none;
+    display: none;
+    backdrop-filter: blur(8px);
+    animation: voice-blink 1s infinite;
+    white-space: nowrap;
+    z-index: 200;
+  }
+  #voice-status.show { display: block; }
+  @keyframes voice-blink {
+    0%, 100% { opacity: 1; }
+    50% { opacity: 0.6; }
+  }
+
+  @media (max-width: 700px) {
+    header h1 { font-size: 22px; }
+    #prompt { font-size: 16px; }
+    #side-panel { width: 120px; gap: 12px; padding: 12px 8px; }
+    #draw-btn { font-size: 20px; width: 100px; height: 100px; padding: 12px 8px; border-radius: 14px; }
+    #mic-btn { width: 96px; height: 96px; font-size: 44px; }
+    #clear-btn-side { width: 100px; height: 80px; font-size: 16px; border-radius: 14px; }
+    #dash-btn { width: 96px; height: 70px; font-size: 40px; border-radius: 16px; }
+    .toolbar-btn { font-size: 13px; padding: 10px 14px; }
+    
+    #finish-bar { flex-direction: column; text-align: center; gap: 12px; padding: 20px; }
+    #finish-msg { font-size: 18px; white-space: normal; }
+    #print-big-btn { width: 100%; font-size: 20px; padding: 16px; }
+    #reset-btn { width: 100%; padding: 14px; }
+  }
+
+  /* ===== 起動ローディング画面 ===== */
+  #loading-overlay {
+    position: fixed;
+    inset: 0;
+    background: var(--bg);
+    z-index: 9999;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    gap: 20px;
+    transition: opacity 0.6s ease;
+  }
+  #loading-overlay.hidden {
+    opacity: 0;
+    pointer-events: none;
+  }
+  #loading-icon {
+    font-size: 72px;
+    animation: loading-float 1.4s ease-in-out infinite alternate;
+    line-height: 1;
+  }
+  @keyframes loading-float {
+    from { transform: translateY(0) scale(0.95); }
+    to   { transform: translateY(-12px) scale(1.05); }
+  }
+  #loading-title {
+    font-size: 32px;
+    font-weight: 900;
+    color: var(--text);
+    letter-spacing: 0.02em;
+  }
+  #loading-status {
+    font-size: 20px;
+    font-weight: 700;
+    color: var(--accent);
+    min-height: 1.4em;
+  }
+  #loading-sub {
+    font-size: 14px;
+    color: var(--muted);
+  }
+
+  /* ===== スタート画面 ===== */
+  #start-overlay {
+    position: fixed;
+    inset: 0;
+    background: var(--bg);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    z-index: 1000;
+    transition: opacity 0.4s ease, visibility 0.4s ease;
+  }
+  #start-overlay.hidden {
+    opacity: 0;
+    visibility: hidden;
+  }
+  #start-box {
+    background: var(--surface);
+    border-radius: 28px;
+    padding: 40px 48px;
+    text-align: center;
+    box-shadow: 0 20px 60px rgba(0,0,0,0.1);
+    border: 4px solid var(--border);
+    max-width: 500px;
+    width: 90%;
+  }
+  #start-box h2 {
+    font-size: 28px;
+    color: var(--accent);
+    margin-bottom: 8px;
+    font-weight: 900;
+  }
+  #start-box p {
+    font-size: 16px;
+    color: var(--muted);
+    margin-bottom: 32px;
+    font-weight: 700;
+  }
+  .start-buttons {
+    display: flex;
+    flex-direction: column;
+    gap: 16px;
+  }
+  .start-btn {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    gap: 12px;
+    width: 100%;
+    padding: 20px;
+    font-size: 22px;
+    font-weight: 900;
+    font-family: inherit;
+    border: none;
+    border-radius: 18px;
+    cursor: pointer;
+    transition: all 0.2s;
+  }
+  .btn-icon {
+    font-size: 28px;
+  }
+  .voice-btn {
+    background: linear-gradient(135deg, #ff6b35, #ff5722);
+    color: #fff;
+    box-shadow: 0 6px 20px rgba(255,107,53,0.35);
+  }
+  .voice-btn:hover {
+    transform: translateY(-3px);
+    box-shadow: 0 10px 28px rgba(255,107,53,0.5);
+  }
+  .voice-btn:active, .keyboard-btn:active {
+    transform: scale(0.97);
+  }
+  .keyboard-btn {
+    background: #f5f5f5;
+    color: var(--text);
+    border: 3px solid #ddd;
+  }
+  .keyboard-btn:hover {
+    background: #e8e8e8;
+    transform: translateY(-3px);
+  }
+
+  /* ===== 画面ロック（キオスク）：ボタン以外に反応させない ===== */
+  html, body {
+    overscroll-behavior: none;          /* 引っぱって更新・スワイプで戻る を防ぐ */
+    touch-action: manipulation;         /* ダブルタップ拡大を防ぐ */
+    -webkit-touch-callout: none;
+  }
+  img { -webkit-user-drag: none; user-select: none; }
+
+  /* ===== 管理者 PIN 入力 ===== */
+  #pin-overlay, #admin-overlay {
+    position: fixed; inset: 0; z-index: 100000;
+    display: none; align-items: center; justify-content: center;
+    background: rgba(15, 23, 42, .55);
+    font-family: system-ui, "Segoe UI", sans-serif;
+  }
+  #pin-overlay.show, #admin-overlay.show { display: flex; }
+  #pin-box {
+    background: #fff; border-radius: 20px; padding: 24px 28px 20px;
+    width: 320px; box-shadow: 0 20px 60px rgba(0,0,0,.35); text-align: center;
+  }
+  #pin-box h2 { font-size: 18px; color: #1e3a5f; margin-bottom: 14px; }
+  #pin-dots { display: flex; justify-content: center; gap: 14px; margin-bottom: 8px; }
+  #pin-dots span {
+    width: 16px; height: 16px; border-radius: 50%;
+    border: 2px solid #1e3a5f; background: transparent; transition: background .1s;
+  }
+  #pin-dots span.on { background: #1e3a5f; }
+  #pin-msg { height: 20px; font-size: 13px; color: #dc2626; margin-bottom: 8px; }
+  #pin-box.shake { animation: pinShake .35s; }
+  @keyframes pinShake {
+    20%, 60% { transform: translateX(-8px); } 40%, 80% { transform: translateX(8px); }
+  }
+  #pin-keys { display: grid; grid-template-columns: repeat(3, 1fr); gap: 10px; }
+  #pin-keys button, #pin-cancel {
+    font-size: 22px; font-weight: 700; padding: 14px 0; border-radius: 12px;
+    border: 1px solid #cbd5e1; background: #f8fafc; color: #1f2937; cursor: pointer;
+  }
+  #pin-keys button:active { background: #e2e8f0; }
+  #pin-keys button.sub { font-size: 15px; color: #475569; }
+  #pin-cancel { width: 100%; margin-top: 12px; font-size: 15px; background: #fff; }
+
+  /* ===== 管理画面（画面内に表示） ===== */
+  #admin-panel {
+    width: min(560px, 94vw); height: min(860px, 94vh);
+    background: #f0f4f8; border-radius: 16px; overflow: hidden;
+    display: flex; flex-direction: column; box-shadow: 0 20px 60px rgba(0,0,0,.4);
+  }
+  #admin-head {
+    display: flex; align-items: center; gap: 8px; padding: 10px 12px;
+    background: #1e3a5f; color: #fff; font-weight: 700;
+  }
+  #admin-head .grow { flex: 1; }
+  #admin-head button {
+    font-size: 14px; font-weight: 700; padding: 8px 12px; border-radius: 8px;
+    border: none; cursor: pointer; background: #fff; color: #1e3a5f;
+  }
+  #admin-frame { flex: 1; border: 0; width: 100%; background: #f0f4f8; }
+</style>
+</head>
+<body>
+
+<!-- 起動ローディング画面：ネット接続確認後に自動で消える -->
+<div id="loading-overlay"><script>if(sessionStorage.getItem('startupCheckDone'))document.currentScript.parentElement.style.display='none';</script>
+  <div id="loading-icon">🎨</div>
+  <div id="loading-title">AI お絵描き</div>
+  <div id="loading-status">じゅんびちゅう... 🔄</div>
+  <div id="loading-sub">ネットワークとマイクをかくにんしています</div>
+</div>
+
+<div id="start-overlay" class="hidden">
+  <div id="start-box">
+    <h2>どうやってお<ruby>題<rt>だい</rt></ruby>を<ruby>決<rt>き</rt></ruby>める？</h2>
+    <p>すきなほうをえらんでね！</p>
+    <div class="start-buttons">
+      <button class="start-btn voice-btn" onclick="selectVoice()">
+        <span class="btn-icon">🎤</span>
+        こえで<ruby>入力<rt>にゅうりょく</rt></ruby>する
+      </button>
+      <button class="start-btn keyboard-btn" onclick="selectKeyboard()">
+        <span class="btn-icon">⌨️</span>
+        キーボードで<ruby>入力<rt>にゅうりょく</rt></ruby>
+      </button>
+    </div>
+  </div>
+</div>
+
+<header>
+  <!-- 左上：プロデュース表記 -->
+  <div id="produced-by">
+    <span class="pb-label">PRODUCED BY</span>
+    <div class="pb-logos">
+      <img src="assets/logo-manoi.png" alt="ロボットゆうえんち">
+      <img src="assets/logo-lubo.png" class="pb-tile" alt="LuBo">
+    </div>
+  </div>
+  <h1 id="app-title">🎨 AI お<ruby>絵<rt>え</rt></ruby><ruby>描<rt>か</rt></ruby>き ✨<span id="fs-progress"></span></h1>
+  <p><ruby>描<rt>か</rt></ruby>きたいものを<ruby>入力<rt>にゅうりょく</rt></ruby>すると、AIが<ruby>一筆<rt>ひとふで</rt></ruby>ずつ<ruby>描<rt>か</rt></ruby>いてくれます</p>
+  <button id="cancel-btn" onclick="cancelDraw()">⏹ <ruby>中止<rt>ちゅうし</rt></ruby>する</button>
+</header>
+<div id="fs-toast"></div>
+
+<div id="app">
+  <div id="toolbar">
+    <div id="prompt-wrap">
+      <input type="text" id="prompt" lang="ja" autocomplete="off" autocapitalize="off" autocorrect="off" spellcheck="false" inputmode="text" style="ime-mode: active;" placeholder="れい: ゆうやけのふじさん、うちゅうをおよぐくじら..." />
+    </div>
+  </div>
+
+  <div id="main-area">
+  <div id="canvas-outer">
+    <div id="canvas-wrap">
+      <canvas id="main-canvas"></canvas>
+      <canvas id="anim-canvas"></canvas>
+
+      <div id="status-bar">「<ruby>描<rt>か</rt></ruby>く」ボタンを<ruby>押<rt>お</rt></ruby>してね！</div>
+      <div id="progress-bar"></div>
+
+      <div id="voice-status">🎤 <ruby>聞<rt>き</rt></ruby>いています...</div>
+
+      <div id="error-overlay">
+        <div id="error-box">
+          <span id="error-emoji">😢</span>
+          <div id="error-title">エラーが<ruby>発生<rt>はっせい</rt></ruby>しました</div>
+          <div id="error-message"></div>
+
+          <button id="error-draw-again-btn" onclick="startDraw()">
+            🔄 <ruby>同<rt>おな</rt></ruby>じお<ruby>題<rt>だい</rt></ruby>でもう<ruby>一度<rt>いちど</rt></ruby>かく
+          </button>
+          <button id="error-retry-btn" onclick="retryDraw()">
+            ✏️ お<ruby>題<rt>だい</rt></ruby>を<ruby>変<rt>か</rt></ruby>える
+          </button>
+          <button id="error-reload-btn" onclick="location.reload()">
+            🏠 <ruby>最初<rt>さいしょ</rt></ruby>の<ruby>画面<rt>がめん</rt></ruby>にもどる
+          </button>
+        </div>
+      </div>
+
+      <div id="post-print-overlay">
+        <div id="post-print-box">
+          <h2>🎉 <ruby>印刷<rt>いんさつ</rt></ruby>がおわりました！</h2>
+          <p>プリンターから<ruby>紙<rt>かみ</rt></ruby>をうけとってね</p>
+
+          <button class="post-print-btn btn-restart" onclick="location.reload()">
+            🏠 つぎのひとへ (<ruby>最初<rt>さいしょ</rt></ruby>にもどる)
+          </button>
+          <button class="post-print-btn btn-view-again" onclick="hidePostPrintOverlay()">
+            👀 <ruby>描<rt>か</rt></ruby>いた<ruby>絵<rt>え</rt></ruby>をもう<ruby>一度<rt>いちど</rt></ruby>みる
+          </button>
+        </div>
+      </div>
+
+    </div>
+  </div>
+
+  <aside id="side-panel">
+    <button id="dash-btn" type="button" title="長音「ー」を入れる" onclick="insertDash()">ー</button>
+    <button id="mic-btn" title="音声で入力" onclick="toggleVoice()">🎤</button>
+    <button id="draw-btn" class="toolbar-btn" onclick="startDraw()">🎨<br><ruby>描<rt>か</rt></ruby>く</button>
+    <button id="clear-btn-side" type="button" onclick="clearAll()">🗑️<br>クリア</button>
+  </aside>
+  </div><!-- /#main-area -->
+
+  <div id="print-caption"></div>
+
+  <div id="info-bar">
+    <span><ruby>例<rt>れい</rt></ruby>:</span>
+    <span class="tag" onclick="usePrompt('かわいい いぬ')">🐶 いぬ</span>
+    <span class="tag" onclick="usePrompt('かわいい ねこ')">🐱 ねこ</span>
+    <span class="tag" onclick="usePrompt('うさぎ')">🐰 うさぎ</span>
+    <span class="tag" onclick="usePrompt('ぞう')">🐘 ぞう</span>
+    <span class="tag" onclick="usePrompt('ライオン')">🦁 ライオン</span>
+    <span class="tag" onclick="usePrompt('ペンギン')">🐧 ペンギン</span>
+    <span class="tag" onclick="usePrompt('あかい りんご')">🍎 りんご</span>
+    <span class="tag" onclick="usePrompt('バナナ')">🍌 バナナ</span>
+    <span class="tag" onclick="usePrompt('いちご')">🍓 いちご</span>
+    <span class="tag" onclick="usePrompt('ぶどう')">🍇 ぶどう</span>
+    <span class="tag" onclick="usePrompt('みかん')">🍊 みかん</span>
+    <span class="tag" onclick="usePrompt('すいか')">🍉 すいか</span>
+  </div>
+
+  <div id="finish-bar">
+    <div id="finish-msg">🎉 <ruby>完成<rt>かんせい</rt></ruby>しました！</div>
+    <button id="print-big-btn" onclick="printImage()">🖨️ <ruby>印刷<rt>いんさつ</rt></ruby>する</button>
+    <button id="reset-btn" onclick="location.reload()">🔄 <ruby>最初<rt>さいしょ</rt></ruby>から</button>
+  </div>
+
+</div>
+
+<script>
+const mainCanvas = document.getElementById('main-canvas');
+const animCanvas = document.getElementById('anim-canvas');
+const ctx = mainCanvas.getContext('2d');
+const actx = animCanvas.getContext('2d');
+const statusEl = document.getElementById('status-bar');
+const progressEl = document.getElementById('progress-bar');
+const printCaption = document.getElementById('print-caption');
+const promptInput = document.getElementById('prompt');
+const micBtn = document.getElementById('mic-btn');
+const voiceStatus = document.getElementById('voice-status');
+
+// バー・オーバーレイの切り替え用
+const infoBar = document.getElementById('info-bar');
+const finishBar = document.getElementById('finish-bar');
+const finishMsg = document.getElementById('finish-msg');
+const errorOverlay = document.getElementById('error-overlay');
+const errorMessage = document.getElementById('error-message');
+const postPrintOverlay = document.getElementById('post-print-overlay');
+
+// AIに描かせる論理キャンバスサイズ（px）。実画面の大きさに関わらずこの座標系で生成し、
+// 表示時に実キャンバスへ拡大する。これにより画面サイズが変わっても絵の密度が一定になる。
+// 489 は、品質が良かった頃の本番機で実際に使われていた値に合わせている。
+const DRAW_CANVAS_SIZE = 489;
+
+let drawing = false;
+let drawCancelled = false;
+let drawAbortController = null;
+let lastPrompt = '';
+// ===== BGM =====
+// 「考え中BGM」は BGM フォルダ内の音源からランダムで選ぶ。
+// BGM2.mp3 は完成時の効果音なので、ランダム対象からは除外する（サーバー側で除外して返す）。
+const BGM_COMPLETE = 'BGM/BGM2.mp3';
+const BGM_FALLBACK = ['BGM/BGM1.mp3'];   // 一覧が取れなかったときの保険
+let bgmTracks = BGM_FALLBACK.slice();
+let lastBgmIndex = -1;
+
+const thinkingAudio = new Audio(bgmTracks[0]);
+const completeAudio = new Audio(BGM_COMPLETE);
+thinkingAudio.loop = true;
+thinkingAudio.preload = 'auto';
+completeAudio.preload = 'auto';
+
+// BGMフォルダの一覧をサーバーから取得（BGM3.mp3 などを置くだけで自動的に増える）
+async function loadBgmList() {
+  try {
+    const res = await fetch('http://127.0.0.1:5000/api/bgm/list');
+    if (!res.ok) return;
+    const data = await res.json();
+    if (Array.isArray(data.tracks) && data.tracks.length > 0) {
+      bgmTracks = data.tracks;
+      console.log('[BGM] 考え中BGM ' + bgmTracks.length + '曲:', bgmTracks.join(', '));
+    }
+  } catch (_) {}
+}
+loadBgmList();
+
+// 直前と同じ曲が続かないようにランダムで1曲選ぶ
+function pickBgmTrack() {
+  if (bgmTracks.length === 0) return null;
+  if (bgmTracks.length === 1) { lastBgmIndex = 0; return bgmTracks[0]; }
+  let idx;
+  do { idx = Math.floor(Math.random() * bgmTracks.length); } while (idx === lastBgmIndex);
+  lastBgmIndex = idx;
+  return bgmTracks[idx];
+}
+
+// 管理者設定（サーバーからポーリングして同期）
+let appSettings = { bgm_enabled: true, bgm_volume: 80, draw_speed: 2 };
+
+function applyBgmSettings() {
+  const vol = appSettings.bgm_enabled ? appSettings.bgm_volume / 100 : 0;
+  thinkingAudio.volume = vol;
+  completeAudio.volume = vol;
+}
+
+async function syncSettings() {
+  try {
+    const res = await fetch('http://127.0.0.1:5000/api/admin/settings');
+    if (!res.ok) return;
+    const data = await res.json();
+    appSettings.bgm_enabled = data.bgm_enabled ?? true;
+    appSettings.bgm_volume  = data.bgm_volume  ?? 80;
+    appSettings.draw_speed  = data.draw_speed  ?? 2;
+    applyBgmSettings();
+  } catch (_) {}
+}
+
+// 3秒ごとに設定を同期
+syncSettings();
+setInterval(syncSettings, 3000);
+
+function reportStatus(status) {
+  fetch('http://127.0.0.1:5000/api/admin/status?draw_status=' + encodeURIComponent(status))
+    .catch(() => {});
+}
+
+function playAudio(audio) {
+  try {
+    audio.currentTime = 0;
+    const p = audio.play();
+    if (p && typeof p.catch === 'function') p.catch(() => {});
+  } catch (_) {}
+}
+
+function stopAudio(audio) {
+  try {
+    audio.pause();
+    audio.currentTime = 0;
+  } catch (_) {}
+}
+
+function startThinkingSound() {
+  stopAudio(completeAudio);
+  if (!appSettings.bgm_enabled) return;
+  // 描くたびにランダムで曲を選び直す
+  const track = pickBgmTrack();
+  if (track && !thinkingAudio.src.endsWith(track)) {
+    thinkingAudio.src = track;
+    thinkingAudio.load();
+  }
+  applyBgmSettings();
+  playAudio(thinkingAudio);
+}
+
+function stopThinkingSound() {
+  stopAudio(thinkingAudio);
+}
+
+function playCompleteSound() {
+  stopThinkingSound();
+  if (appSettings.bgm_enabled) playAudio(completeAudio);
+}
+
+function unlockAudio() {
+  [thinkingAudio, completeAudio].forEach((audio) => {
+    try {
+      audio.muted = true;
+      const p = audio.play();
+      if (p && typeof p.then === 'function') {
+        p.then(() => {
+          audio.pause();
+          audio.currentTime = 0;
+          audio.muted = false;
+        }).catch(() => { audio.muted = false; });
+      } else {
+        audio.muted = false;
+      }
+    } catch (_) {
+      audio.muted = false;
+    }
+  });
+}
+
+// ===== 「ー」を入力欄のカーソル位置に挿入する =====
+function insertDash() {
+  flushRomajiBuffer();
+  insertAtPromptCursor('ー');
+}
+
+// ===== ログ送信機能 =====
+async function sendLog(type, data) {
+  try {
+    await fetch('http://localhost:5000/api/log', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ type: type, data: data })
+    });
+  } catch(e) {
+    console.error('ログの送信に失敗しました:', e);
+  }
+}
+
+// ===== 音声入力 =====
+// WebView2(Edge) の Web Speech API は Microsoft/Google の音声サーバーへ接続するため、
+// 通信が一瞬でも不安定だと 'network' エラーになる。
+// 以前はそのたびに「ネットワークにせつぞくちゅう...(1/8)」を最大24秒表示し、
+// その間ボタンは🎤（止まって見える）のままで、結局マイクが使えなかった。
+// いまは
+//   1) network エラーは1回だけすぐにやり直す
+//   2) それでもダメなら「録音 → サーバー(Gemini)で文字起こし」に自動で切り替える
+//   3) どの経路でも最後は必ず idle に戻す（押しても反応しない状態を作らない）
+// という流れにしている。
+let recognition = null;
+let micMode = 'idle';          // idle / starting / listening / recording / busy
+let micSession = 0;            // 世代番号。古いインスタンスのイベントはすべて捨てる
+let _micRetryTimer = null;
+let _micWatchdog = null;
+let _micNetworkRetry = 0;
+let _micStopRecorder = null;   // 録音中だけ入る「録音を終える関数」
+let _micSpeechBroken = false;  // 音声サーバーに届かなかった＝以後は録音方式を使う
+
+const _MIC_NETWORK_MAX_RETRY = 1;    // network エラーの即やり直し回数
+const _MIC_NETWORK_RETRY_DELAY = 500;
+const _MIC_START_TIMEOUT = 5000;     // onstart が来なければ録音方式へ切り替え
+const _MIC_STOP_TIMEOUT = 3000;      // stop() 後に onend が来ないときの保険
+const _REC_MAX_MS = 8000;            // 録音の最大長
+const _REC_SILENCE_MS = 1300;        // 声のあとこれだけ静かなら録音終了
+const _REC_MIN_MS = 400;             // 短すぎる録音は送らない
+const _REC_LOUD_RMS = 0.02;          // 「声がある」とみなす音量
+const _REC_RATE = 16000;             // 送信する WAV のサンプリングレート
+
+function setMicUI(mode) {
+  micMode = mode;
+  const active = (mode === 'listening' || mode === 'recording');
+  micBtn.classList.toggle('listening', active);
+  micBtn.classList.toggle('connecting', mode === 'starting' || mode === 'busy');
+  micBtn.textContent = active ? '🔴' : (mode === 'idle' ? '🎤' : '⏳');
+  voiceStatus.classList.toggle('show', active);
+}
+
+function micGoIdle(msg) {
+  setMicUI('idle');
+  if (msg) setStatus(msg);
+}
+
+/** 進行中の音声入力をすべて止めて idle に戻す（古いイベントも無効化する） */
+function resetMicRecognition() {
+  micSession++;
+  if (_micRetryTimer) { clearTimeout(_micRetryTimer); _micRetryTimer = null; }
+  if (_micWatchdog)   { clearTimeout(_micWatchdog);   _micWatchdog = null; }
+  if (_micStopRecorder) {
+    const stopRec = _micStopRecorder;
+    _micStopRecorder = null;
+    try { stopRec(true); } catch (_) {}
+  }
+  if (recognition) {
+    const r = recognition;
+    recognition = null;
+    try { r.abort(); } catch (_) {}
+  }
+  micGoIdle();
+}
+
+function initSpeech(session) {
+  const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition;
+  if (!SpeechRecognition) {
+    console.error('[Mic] SpeechRecognition API がブラウザにありません');
+    return null;
+  }
+
+  const r = new SpeechRecognition();
+  r.lang = 'ja-JP';
+  r.continuous = false;
+  r.interimResults = true;
+  r.maxAlternatives = 1;
+
+  // このインスタンスが「いま使っているもの」かどうか。
+  // 古いインスタンスのイベントで画面状態を壊さないための番人。
+  const alive = () => (session === micSession && recognition === r);
+
+  r.onstart = () => {
+    if (!alive()) return;
+    _micSpeechBroken = false;      // つながったので通常経路に戻してよい
+    if (_micWatchdog) { clearTimeout(_micWatchdog); _micWatchdog = null; }
+    setMicUI('listening');
+    setStatus('🎤 <ruby>話<rt>はな</rt></ruby>しかけてください...');
+    console.log('[Mic] 認識開始');
+  };
+
+  r.onresult = (e) => {
+    if (!alive()) return;
+    _micNetworkRetry = 0;
+    let interim = '';
+    let final = '';
+    for (let i = e.resultIndex; i < e.results.length; i++) {
+      const t = e.results[i][0].transcript;
+      if (e.results[i].isFinal) final += t;
+      else interim += t;
+    }
+    promptInput.value = final || interim;
+    console.log('[Mic] 結果:', final || interim);
+  };
+
+  r.onend = () => {
+    if (!alive()) return;
+    if (_micWatchdog) { clearTimeout(_micWatchdog); _micWatchdog = null; }
+    recognition = null;
+    setMicUI('idle');
+    if (promptInput.value.trim()) {
+      setStatus('<ruby>音声<rt>おんせい</rt></ruby><ruby>入力<rt>にゅうりょく</rt></ruby><ruby>完了<rt>かんりょう</rt></ruby>！「<ruby>描<rt>か</rt></ruby>く」を<ruby>押<rt>お</rt></ruby>してね！');
+    }
+    console.log('[Mic] 認識終了');
+  };
+
+  r.onerror = (e) => {
+    if (!alive()) return;
+    if (_micWatchdog) { clearTimeout(_micWatchdog); _micWatchdog = null; }
+    console.error('[Mic] エラー:', e.error, e);
+
+    // このインスタンスは用済み。以降のイベントは alive() が false になり無視される
+    const dropInstance = () => {
+      recognition = null;
+      try { r.abort(); } catch (_) {}
+    };
+
+    switch (e.error) {
+      case 'aborted':
+        return; // 自分で止めたときは何も表示しない
+
+      case 'no-speech':
+        dropInstance();
+        micGoIdle('こえが<ruby>聞<rt>き</rt></ruby>こえませんでした。もう<ruby>一度<rt>いちど</rt></ruby>マイクをおしてください。');
+        return;
+
+      case 'audio-capture':
+        dropInstance();
+        micGoIdle('マイクが<ruby>見<rt>み</rt></ruby>つかりません。マイクが<ruby>接続<rt>せつぞく</rt></ruby>されているか<ruby>確認<rt>かくにん</rt></ruby>してください。');
+        return;
+
+      case 'not-allowed':
+      case 'permission-denied':
+        dropInstance();
+        micGoIdle('マイクの<ruby>使用<rt>しよう</rt></ruby>が<ruby>許可<rt>きょか</rt></ruby>されていません。Windowsのせっていでマイクを<ruby>許可<rt>きょか</rt></ruby>してください。');
+        return;
+
+      case 'network':
+        // 音声サーバーへの接続が切れただけのことが多いので、まず1回だけ即やり直す
+        if (_micNetworkRetry < _MIC_NETWORK_MAX_RETRY) {
+          _micNetworkRetry++;
+          console.log('[Mic] network エラー → すぐにやり直します');
+          dropInstance();
+          setMicUI('starting');
+          setStatus('🎤 マイクをじゅんびちゅう...');
+          _micRetryTimer = setTimeout(() => {
+            _micRetryTimer = null;
+            startSpeechRecognition(session);
+          }, _MIC_NETWORK_RETRY_DELAY);
+          return;
+        }
+        // 2回続けてダメ＝音声サーバーに届いていない。録音方式に切り替える
+        console.warn('[Mic] network エラーが続くため録音方式に切り替えます');
+        _micSpeechBroken = true;
+        dropInstance();
+        startRecordFallback(session);
+        return;
+
+      case 'service-not-allowed':
+      case 'language-not-supported':
+        _micSpeechBroken = true;
+        dropInstance();
+        startRecordFallback(session);
+        return;
+
+      default:
+        dropInstance();
+        micGoIdle('<ruby>音声<rt>おんせい</rt></ruby>エラー: ' + e.error);
+    }
+  };
+
+  return r;
+}
+
+/** Web Speech API で認識を開始する */
+function startSpeechRecognition(session) {
+  if (session !== micSession) return;
+
+  // 前回つながらなかったときは、待たずに録音方式でいく
+  if (_micSpeechBroken) {
+    startRecordFallback(session);
+    return;
+  }
+
+  recognition = initSpeech(session);
+  if (!recognition) {           // API 自体が無いブラウザ
+    startRecordFallback(session);
+    return;
+  }
+
+  setMicUI('starting');
+  setStatus('🎤 マイクをじゅんびちゅう...');
+  try {
+    recognition.start();
+  } catch (e) {
+    console.error('[Mic] start() 失敗:', e);
+    const r = recognition;
+    recognition = null;
+    try { r.abort(); } catch (_) {}
+    startRecordFallback(session);
+    return;
+  }
+
+  // onstart も onerror も来ないまま固まるケースの保険
+  _micWatchdog = setTimeout(() => {
+    _micWatchdog = null;
+    if (session !== micSession || micMode !== 'starting') return;
+    console.warn('[Mic] 反応がないため録音方式に切り替えます');
+    _micSpeechBroken = true;
+    const r = recognition;
+    recognition = null;
+    if (r) { try { r.abort(); } catch (_) {} }
+    startRecordFallback(session);
+  }, _MIC_START_TIMEOUT);
+}
+
+/** 保険の経路：マイクで録音して、サーバー(Gemini)で文字起こしする */
+async function startRecordFallback(session) {
+  if (session !== micSession) return;
+
+  const AudioCtx = window.AudioContext || window.webkitAudioContext;
+  if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia || !AudioCtx) {
+    micGoIdle('このアプリでは<ruby>音声入力<rt>おんせいにゅうりょく</rt></ruby>がつかえません。キーボードでにゅうりょくしてください。');
+    return;
+  }
+
+  setMicUI('starting');
+  setStatus('🎤 マイクをじゅんびちゅう...');
+
+  let stream;
+  try {
+    stream = await navigator.mediaDevices.getUserMedia({
+      audio: { channelCount: 1, echoCancellation: true, noiseSuppression: true }
+    });
+  } catch (e) {
+    console.error('[Mic] getUserMedia 失敗:', e);
+    if (session !== micSession) return;
+    micGoIdle(e && e.name === 'NotAllowedError'
+      ? 'マイクの<ruby>使用<rt>しよう</rt></ruby>が<ruby>許可<rt>きょか</rt></ruby>されていません。Windowsのせっていでマイクを<ruby>許可<rt>きょか</rt></ruby>してください。'
+      : 'マイクが<ruby>見<rt>み</rt></ruby>つかりません。マイクが<ruby>接続<rt>せつぞく</rt></ruby>されているか<ruby>確認<rt>かくにん</rt></ruby>してください。');
+    return;
+  }
+
+  if (session !== micSession) {   // 待っている間に止められた
+    stream.getTracks().forEach(t => { try { t.stop(); } catch (_) {} });
+    return;
+  }
+  recordAndTranscribe(session, stream, AudioCtx);
+}
+
+function recordAndTranscribe(session, stream, AudioCtx) {
+  const ac = new AudioCtx();
+  const srcRate = ac.sampleRate;
+  const source = ac.createMediaStreamSource(stream);
+  const proc = ac.createScriptProcessor(4096, 1, 1);
+  const mute = ac.createGain();
+  mute.gain.value = 0;            // スピーカーには出さない（ハウリング防止）
+
+  const chunks = [];
+  let sampleCount = 0;
+  let heardVoice = false;
+  let lastLoud = 0;
+  let done = false;
+
+  const finish = (cancelled) => {
+    if (done) return;
+    done = true;
+    if (_micStopRecorder === finish) _micStopRecorder = null;
+    clearTimeout(maxTimer);
+    try { proc.disconnect(); } catch (_) {}
+    try { mute.disconnect(); } catch (_) {}
+    try { source.disconnect(); } catch (_) {}
+    try { ac.close(); } catch (_) {}
+    stream.getTracks().forEach(t => { try { t.stop(); } catch (_) {} });
+
+    if (cancelled || session !== micSession) return;
+    const ms = (sampleCount / srcRate) * 1000;
+    if (!heardVoice || ms < _REC_MIN_MS) {
+      micGoIdle('こえが<ruby>聞<rt>き</rt></ruby>こえませんでした。もう<ruby>一度<rt>いちど</rt></ruby>マイクをおしてください。');
+      return;
+    }
+    sendAudioForTranscribe(session, chunks, sampleCount, srcRate);
+  };
+
+  const maxTimer = setTimeout(() => finish(false), _REC_MAX_MS);
+  _micStopRecorder = finish;
+
+  proc.onaudioprocess = (ev) => {
+    if (done) return;
+    const input = ev.inputBuffer.getChannelData(0);
+    chunks.push(new Float32Array(input));
+    sampleCount += input.length;
+
+    let sum = 0;
+    for (let i = 0; i < input.length; i++) sum += input[i] * input[i];
+    const rms = Math.sqrt(sum / input.length);
+    const now = performance.now();
+    if (rms > _REC_LOUD_RMS) { heardVoice = true; lastLoud = now; }
+    // 声を拾ったあと、しばらく静かになったら自動で録音終了
+    if (heardVoice && now - lastLoud > _REC_SILENCE_MS) finish(false);
+  };
+
+  source.connect(proc);
+  proc.connect(mute);
+  mute.connect(ac.destination);
+  if (ac.state === 'suspended') { ac.resume().catch(() => {}); }
+
+  setMicUI('recording');
+  setStatus('🎤 <ruby>話<rt>はな</rt></ruby>しかけてください...');
+  console.log('[Mic] 録音開始（サーバー文字起こし）');
+}
+
+async function sendAudioForTranscribe(session, chunks, sampleCount, srcRate) {
+  setMicUI('busy');
+  setStatus('🎧 きいたこえを<ruby>文字<rt>もじ</rt></ruby>にしています...');
+
+  let text = '';
+  try {
+    const wav = encodeWav(chunks, sampleCount, srcRate);
+    const res = await fetch('/api/transcribe', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ audio: arrayBufferToBase64(wav), mime: 'audio/wav' })
+    });
+    const data = await res.json().catch(() => ({}));
+    if (!res.ok || data.error) throw new Error(data.error || ('HTTP ' + res.status));
+    text = (data.text || '').trim();
+  } catch (e) {
+    console.error('[Mic] 文字起こし失敗:', e);
+    if (session !== micSession) return;
+    micGoIdle('こえを<ruby>文字<rt>もじ</rt></ruby>にできませんでした。キーボードでにゅうりょくしてください。');
+    return;
+  }
+
+  if (session !== micSession) return;
+  if (!text) {
+    micGoIdle('こえが<ruby>聞<rt>き</rt></ruby>こえませんでした。もう<ruby>一度<rt>いちど</rt></ruby>マイクをおしてください。');
+    return;
+  }
+  promptInput.value = text;
+  micGoIdle('<ruby>音声<rt>おんせい</rt></ruby><ruby>入力<rt>にゅうりょく</rt></ruby><ruby>完了<rt>かんりょう</rt></ruby>！「<ruby>描<rt>か</rt></ruby>く」を<ruby>押<rt>お</rt></ruby>してね！');
+  console.log('[Mic] 文字起こし結果:', text);
+}
+
+/** 録音した波形を 16kHz・16bit モノラルの WAV に変換する */
+function encodeWav(chunks, sampleCount, srcRate) {
+  const merged = new Float32Array(sampleCount);
+  let offset = 0;
+  for (const c of chunks) { merged.set(c, offset); offset += c.length; }
+
+  const ratio = Math.max(1, srcRate / _REC_RATE);
+  const outLen = Math.floor(merged.length / ratio);
+  const buf = new ArrayBuffer(44 + outLen * 2);
+  const view = new DataView(buf);
+  const writeStr = (o, s) => { for (let i = 0; i < s.length; i++) view.setUint8(o + i, s.charCodeAt(i)); };
+
+  writeStr(0, 'RIFF');
+  view.setUint32(4, 36 + outLen * 2, true);
+  writeStr(8, 'WAVEfmt ');
+  view.setUint32(16, 16, true);          // fmt チャンクの長さ
+  view.setUint16(20, 1, true);           // PCM
+  view.setUint16(22, 1, true);           // モノラル
+  view.setUint32(24, _REC_RATE, true);
+  view.setUint32(28, _REC_RATE * 2, true);
+  view.setUint16(32, 2, true);           // ブロックサイズ
+  view.setUint16(34, 16, true);          // 16bit
+  writeStr(36, 'data');
+  view.setUint32(40, outLen * 2, true);
+
+  for (let i = 0; i < outLen; i++) {
+    // 間引くだけだとノイズが乗るので、区間の平均をとる
+    const start = Math.floor(i * ratio);
+    const end = Math.min(merged.length, Math.floor((i + 1) * ratio));
+    let sum = 0, n = 0;
+    for (let j = start; j < end; j++) { sum += merged[j]; n++; }
+    let s = n ? sum / n : 0;
+    s = Math.max(-1, Math.min(1, s));
+    view.setInt16(44 + i * 2, s < 0 ? s * 0x8000 : s * 0x7FFF, true);
+  }
+  return buf;
+}
+
+function arrayBufferToBase64(buffer) {
+  const bytes = new Uint8Array(buffer);
+  const CHUNK = 0x8000;
+  let bin = '';
+  for (let i = 0; i < bytes.length; i += CHUNK) {
+    bin += String.fromCharCode.apply(null, bytes.subarray(i, i + CHUNK));
+  }
+  return btoa(bin);
+}
+
+function toggleVoice() {
+  // すでに動いているときは「止める」。どのモードでも必ず止まるようにする
+  if (micMode !== 'idle') {
+    if (micMode === 'recording' && _micStopRecorder) {
+      const stopRec = _micStopRecorder;
+      _micStopRecorder = null;
+      stopRec(false);                     // 録音を締めて文字起こしへ
+      return;
+    }
+    if (micMode === 'listening' && recognition) {
+      try {
+        recognition.stop();               // 認識結果を確定させる
+        _micWatchdog = setTimeout(() => { // onend が来ないときの保険
+          _micWatchdog = null;
+          if (micMode !== 'idle') resetMicRecognition();
+        }, _MIC_STOP_TIMEOUT);
+        return;
+      } catch (e) { console.error(e); }
+    }
+    resetMicRecognition();
+    return;
+  }
+
+  resetMicRecognition();
+  promptInput.value = '';
+  _micNetworkRetry = 0;
+  startSpeechRecognition(++micSession);
+}
+
+// ===== キャンバスリサイズ（常に正方形） =====
+function resizeCanvases() {
+  const outer = document.getElementById('canvas-outer');
+  const wrap = document.getElementById('canvas-wrap');
+  const maxW = outer.clientWidth - 20;   // padding分
+  const maxH = outer.clientHeight - 20;
+  const size = Math.max(100, Math.min(maxW, maxH));
+  wrap.style.width = size + 'px';
+  wrap.style.height = size + 'px';
+  [mainCanvas, animCanvas].forEach(c => {
+    c.width  = size;
+    c.height = size;
+  });
+}
+
+function usePrompt(text) {
+  promptInput.value = text;
+  setStatus('「<ruby>描<rt>か</rt></ruby>く」ボタンを<ruby>押<rt>お</rt></ruby>してね！');
+}
+
+function setStatus(msg) { statusEl.innerHTML = msg; }
+function setProgress(pct) { progressEl.style.width = pct + '%'; }
+
+function clearAll() {
+  if (drawing) return;
+  stopThinkingAnimation();
+  stopThinkingSound();
+  ctx.clearRect(0, 0, mainCanvas.width, mainCanvas.height);
+  actx.clearRect(0, 0, animCanvas.width, animCanvas.height);
+  setProgress(0);
+  setStatus('クリアしました！また<ruby>描<rt>か</rt></ruby>いてね！');
+
+  // 入力欄も空にしてフォーカスを戻す
+  promptInput.value = '';
+  promptInput.focus();
+
+  // バー・オーバーレイを元に戻す
+  finishBar.style.display = 'none';
+  infoBar.style.display = 'flex';
+  postPrintOverlay.classList.remove('show');
+  printCaption.textContent = '';
+}
+
+function showError(msg) {
+  // 漢字をフリガナ化しつつ、<>エスケープして XSS を防ぐ
+  const safe = msg
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/通信/g, '<ruby>通信<rt>つうしん</rt></ruby>')
+    .replace(/調子/g, '<ruby>調子<rt>ちょうし</rt></ruby>')
+    .replace(/悪/g, '<ruby>悪<rt>わる</rt></ruby>')
+    .replace(/発生/g, '<ruby>発生<rt>はっせい</rt></ruby>')
+    .replace(/不明/g, '<ruby>不明<rt>ふめい</rt></ruby>')
+    .replace(/\n/g, '<br>');
+  errorMessage.innerHTML = safe;
+  errorOverlay.classList.add('show');
+}
+
+function retryDraw() {
+  errorOverlay.classList.remove('show');
+  promptInput.focus();
+  setStatus('もう<ruby>一度<rt>いちど</rt></ruby><ruby>入力<rt>にゅうりょく</rt></ruby>して「<ruby>描<rt>か</rt></ruby>く」を<ruby>押<rt>お</rt></ruby>してね！');
+}
+
+// 絵をもう一度見るボタンのアクション
+function hidePostPrintOverlay() {
+  postPrintOverlay.classList.remove('show');
+  // 印刷ボタンを再度「印刷する」の状態に戻し、再印刷できるようにする
+  const printBtn = document.getElementById('print-big-btn');
+  printBtn.disabled = false;
+  printBtn.innerHTML = '🖨️ <ruby>印刷<rt>いんさつ</rt></ruby>する';
+  // 完成バーを再表示（念のため）
+  finishBar.style.display = 'flex';
+  infoBar.style.display = 'none';
+}
+
+// ===== 印刷 (Flask経由でサイレント印刷) & 5秒後のUI切り替え =====
+async function printImage() {
+  const dataUrl = mainCanvas.toDataURL('image/png');
+  const printBtn = document.getElementById('print-big-btn');
+  printBtn.disabled = true;
+  printBtn.innerHTML = '🖨️ <ruby>印刷中<rt>いんさつちゅう</rt></ruby>...';
+
+  sendLog('PRINT_START', `印刷リクエスト: ${lastPrompt}`);
+
+  try {
+    const res = await fetch('http://localhost:5000/print', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ image: dataUrl, prompt: lastPrompt })
+    });
+    const data = await res.json();
+    
+    if (data.status === 'ok') {
+      // 成功したらカウントダウンを開始
+      let countdown = 5;
+      printBtn.innerHTML = `✅ <ruby>印刷完了<rt>いんさつかんりょう</rt></ruby>！ (${countdown})`;
+
+      sendLog('PRINT_SUCCESS', `印刷成功: ${lastPrompt}`);
+
+      const timer = setInterval(() => {
+        countdown--;
+        if (countdown > 0) {
+          printBtn.innerHTML = `✅ <ruby>印刷完了<rt>いんさつかんりょう</rt></ruby>！ (${countdown})`;
+        } else {
+          // 5秒経過したら、リロードではなくオーバーレイを表示する
+          clearInterval(timer);
+          printBtn.innerHTML = '✅ <ruby>印刷完了<rt>いんさつかんりょう</rt></ruby>！';
+          postPrintOverlay.classList.add('show');
+        }
+      }, 1000);
+
+    } else {
+      throw new Error(data.error || '印刷に失敗しました');
+    }
+  } catch(e) {
+    printBtn.disabled = false;
+    printBtn.innerHTML = '🖨️ <ruby>印刷<rt>いんさつ</rt></ruby>する';
+    alert('いんさつエラー: ' + e.message + '\n\nサーバーがきどうしているかどうか、おとなのひとにかくにんしてもらってね。');
+    
+    sendLog('PRINT_ERROR', `印刷エラー: ${e.message} (お題: ${lastPrompt})`);
+  }
+}
+
+// ===== NGワードフィルター =====
+// 判定はサーバー側（desktopaap.py の _NG_WORDS / _contains_ng_word）に一本化した。
+// /api/draw が {"blocked":"ng_word"} を返すので、fetchCommands 経由で
+// startDraw の catch がやさしい案内を表示する。
+
+// ===== でたらめ入力（キーボード連打）フィルター =====
+// 「ｆなｆはｋふぁｄｈｆｋぱｂふぃ…」のような、日本語として成立しない入力を弾く。
+// サーバー側（desktopaap.py の _is_gibberish）と同じ判定をこちらでも行い、
+// 通信する前にその場で「もういちど」を出せるようにしている。
+const SMALL_KANA_PREV = {
+  'ゃ': 'きしちにひみりぎじぢびぴ',
+  'ゅ': 'きしちにひみりぎじぢびぴてでふゔ',
+  'ょ': 'きしちにひみりぎじぢびぴ',
+  'ぁ': 'ふうゔつくぐ',
+  'ぃ': 'ふうゔつてですず',
+  'ぅ': 'とどうゔ',
+  'ぇ': 'しちじふうゔついでき',
+  'ぉ': 'ふうゔつくぐ',
+  'ゎ': 'くぐ',
+};
+const SOKUON_NG_NEXT = 'あいうえおんーぁぃぅぇぉゃゅょっゎ';
+
+function kanaSequenceBroken(core) {
+  // カタカナはひらがなに寄せてから判定する
+  const s = core.replace(/[ァ-ヶ]/g, ch => String.fromCharCode(ch.charCodeAt(0) - 0x60));
+  for (let i = 0; i < s.length; i++) {
+    const c = s[i];
+    const prev = i > 0 ? s[i - 1] : '';
+    if (SMALL_KANA_PREV[c]) {
+      // 小書き文字は、決まった文字の後ろにしか来られない
+      if (!prev || !SMALL_KANA_PREV[c].includes(prev)) return true;
+    } else if (c === 'っ') {
+      // 促音は語頭・語末、母音や「ん」の直前には来られない
+      const next = i + 1 < s.length ? s[i + 1] : '';
+      if (!prev || !next || SOKUON_NG_NEXT.includes(next)) return true;
+    } else if ((c === 'ん' || c === 'ー') && i === 0) {
+      return true;
+    }
+  }
+  return false;
+}
+
+function looksLikeGibberish(text) {
+  const t = text.trim();
+  if (t.length <= 1) return false;
+  const core = t.replace(/[ 　]/g, '');
+  if (new Set(core).size === 1) return true;              // 同じ文字だけ
+  // 同じ文字が4連続以上。スペースは消さずに判定する
+  // （「かわいい いぬ」を繋げると「いいい」になり、3連続だと正常な入力まで弾くため）
+  if (/(.)\1{3,}/.test(t)) return true;
+  if (core.length > 40) return true;                      // 長すぎる
+  const small = (core.match(/[っぁぃぅぇぉゃゅょゎッァィゥェォャュョヮ]/g) || []).length;
+  if (core.length >= 3 && small / core.length >= 0.5) return true;
+  if (kanaSequenceBroken(core)) return true;
+  if (/[ぁ-ゖァ-ヶ]/.test(core)) {
+    const letters  = core.match(/[A-Za-zＡ-Ｚａ-ｚ]/g) || [];
+    const isolated = core.match(/(?<![A-Za-zＡ-Ｚａ-ｚ])[A-Za-zＡ-Ｚａ-ｚ](?![A-Za-zＡ-Ｚａ-ｚ])/g) || [];
+    if (isolated.length >= 2 || letters.length >= 4) return true;
+  }
+  const counts = {};
+  for (const c of core) counts[c] = (counts[c] || 0) + 1;
+  if (Math.max(...Object.values(counts)) / core.length > 0.7) return true;
+  return false;
+}
+
+// ===== 描画中ボタンロック =====
+function setDrawingLock(locked) {
+  // 描き始めたら音声入力は止める（裏で録音が続くのを防ぐ）
+  if (locked) resetMicRecognition();
+  // 描き始めたらローマ字の途中入力も捨てる（描き終わったあとに残りが出るのを防ぐ）
+  if (locked) romajiBuffer = '';
+  promptInput.disabled = locked;
+  document.getElementById('draw-btn').disabled = locked;
+  document.getElementById('mic-btn').disabled = locked;
+  document.getElementById('dash-btn').disabled = locked;
+  document.getElementById('clear-btn-side').disabled = locked;
+  infoBar.style.pointerEvents = locked ? 'none' : '';
+  infoBar.style.opacity = locked ? '0.4' : '';
+  document.getElementById('cancel-btn').style.display = locked ? 'block' : 'none';
+}
+
+// ===== 描画中止 =====
+function cancelDraw() {
+  if (!drawing) return;
+  drawCancelled = true;
+  if (drawAbortController) drawAbortController.abort();
+}
+
+// ===== 描画メイン =====
+async function startDraw() {
+  if (drawing) return;
+  const prompt = promptInput.value.trim();
+  if (!prompt) {
+    setStatus('<ruby>描<rt>か</rt></ruby>きたいものを<ruby>入力<rt>にゅうりょく</rt></ruby>してね！');
+    promptInput.focus();
+    return;
+  }
+
+  if (looksLikeGibberish(prompt)) {
+    setStatus('なにを<ruby>描<rt>か</rt></ruby>きたいか、もういちど<ruby>入力<rt>にゅうりょく</rt></ruby>してね！');
+    sendLog('INPUT_REJECT', `でたらめ入力: ${prompt}`);
+    promptInput.value = '';
+    promptInput.focus();
+    return;
+  }
+
+  drawing = true;
+  lastPrompt = prompt;
+  sendLog('DRAW_START', `お題: ${prompt}`);
+
+  // 各種オーバーレイやバーをリセット
+  errorOverlay.classList.remove('show');
+  postPrintOverlay.classList.remove('show');
+  finishBar.style.display = 'none';
+  infoBar.style.display = 'flex';
+
+  setDrawingLock(true);
+
+  ctx.clearRect(0, 0, mainCanvas.width, mainCanvas.height);
+  actx.clearRect(0, 0, animCanvas.width, animCanvas.height);
+
+  setStatus('AI が<ruby>考<rt>かんが</rt></ruby>えています... 🤔');
+  setProgress(0);
+  startThinkingAnimation();
+  startThinkingSound();
+  reportStatus('thinking');
+
+  try {
+    const cmds = await fetchCommands(prompt);
+    stopThinkingAnimation();
+    setStatus('<ruby>描<rt>か</rt></ruby>いています... 🎨');
+    reportStatus('drawing');
+    await animate(cmds);
+
+    // 完成したら、下のバーを印刷バーに切り替える
+    infoBar.style.display = 'none';
+    finishBar.style.display = 'flex';
+    finishMsg.innerHTML = `🎉 「${prompt}」が<ruby>完成<rt>かんせい</rt></ruby>しました！`;
+    // 印刷ボタンの状態をリセット
+    const printBtn = document.getElementById('print-big-btn');
+    printBtn.disabled = false;
+    printBtn.innerHTML = '🖨️ <ruby>印刷<rt>いんさつ</rt></ruby>する';
+
+    setProgress(100);
+    setStatus('<ruby>完成<rt>かんせい</rt></ruby>！ ✨');
+    playCompleteSound();
+    reportStatus('idle');
+
+    sendLog('DRAW_SUCCESS', `完成: ${prompt}`);
+
+  } catch(e) {
+    stopThinkingAnimation();
+    stopThinkingSound();
+    reportStatus('idle');
+    if (drawCancelled || e.name === 'AbortError') {
+      ctx.clearRect(0, 0, mainCanvas.width, mainCanvas.height);
+      actx.clearRect(0, 0, animCanvas.width, animCanvas.height);
+      setProgress(0);
+      setStatus('<ruby>中止<rt>ちゅうし</rt></ruby>しました。あたらしいお<ruby>題<rt>だい</rt></ruby>をにゅうりょくしてね！');
+      infoBar.style.display = 'flex';
+    } else if (e.blocked) {
+      // 入力内容による拒否（NGワード・でたらめ入力）。故障ではないのでエラー画面は出さない
+      setProgress(0);
+      setStatus(e.message);
+      infoBar.style.display = 'flex';
+      promptInput.value = '';
+      promptInput.focus();
+      sendLog('INPUT_REJECT', `${e.blocked}: ${prompt}`);
+    } else {
+      const msg = e.message || '不明なエラーが発生しました';
+      setStatus('❌ エラーが<ruby>発生<rt>はっせい</rt></ruby>しました');
+      console.error(e);
+      showError(msg + '\n\n通信の調子が悪いかもしれません。');
+      sendLog('DRAW_ERROR', `エラー: ${msg} (お題: ${prompt})`);
+    }
+  }
+
+  drawing = false;
+  drawCancelled = false;
+  drawAbortController = null;
+  setDrawingLock(false);
+}
+
+// index.html の中の fetchCommands 関数を書き換え
+async function fetchCommands(prompt) {
+  // 画面サイズに関係なく、AIには常に同じ大きさのキャンバスで描かせる。
+  // 実画面が大きいと、コマンド数（25〜40個）と線幅はそのままなのに面積だけ
+  // 広がるため、絵が小さく・線が細く・スカスカになってしまうため。
+  // 描画時に実際のキャンバスへ拡大する（animate 参照）。
+  const W = DRAW_CANVAS_SIZE, H = DRAW_CANVAS_SIZE;
+
+  drawAbortController = new AbortController();
+  const res = await fetch('http://127.0.0.1:5000/api/draw', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ prompt, width: W, height: H }),
+    signal: drawAbortController.signal,
+  });
+
+  // ★ エラー時もレスポンス本文を読んで原因を表示する
+  if (!res.ok) {
+    let detail = '';
+    let blocked = '';
+    try {
+      const errBody = await res.json();
+      if (errBody && errBody.error) detail = errBody.error;
+      if (errBody && errBody.blocked) blocked = errBody.blocked;
+    } catch(_) {
+      try { detail = await res.text(); } catch(_) {}
+    }
+    // NGワード・でたらめ入力などの「入力内容による拒否」は、
+    // 故障ではないのでエラー画面を出さずにやさしい案内へ回す
+    if (blocked) {
+      const err = new Error(detail);
+      err.blocked = blocked;
+      throw err;
+    }
+    console.error('[API] /api/draw エラー', res.status, detail);
+    throw new Error(`サーバーエラー: ${res.status}\n${detail || '(本文なし)'}`);
+  }
+
+  const data = await res.json();
+  if (data.error) throw new Error(data.error);
+
+  // Geminiが返してくる Markdown形式の除去
+  const clean = data.text.replace(/```json|```/g, '').trim();
+  return JSON.parse(clean);
+}
+
+async function animate(cmds) {
+  resizeCanvases();
+  const W = mainCanvas.width, H = mainCanvas.height;
+  // AIは DRAW_CANVAS_SIZE の座標で描いてくるので、実際のキャンバスに合わせて拡大する
+  const S = DRAW_CANVAS_SIZE;
+  const scale = W / S;
+
+  ctx.fillStyle = '#ffffff';
+  ctx.fillRect(0, 0, W, H);
+
+  const speed = appSettings.draw_speed ?? 2;
+  const delayMs = [0, 5, 20, 50, 100][speed] ?? 20;
+
+  ctx.save();  ctx.scale(scale, scale);
+  actx.save(); actx.scale(scale, scale);
+  try {
+    for (let i = 0; i < cmds.length; i++) {
+      if (drawCancelled) break;
+      drawCmd(ctx, cmds[i], S, S);
+      showBrush(actx, cmds[i], S, S);
+      setProgress(Math.round((i + 1) / cmds.length * 95));
+      setStatus(`<ruby>描<rt>か</rt></ruby>いています... ${Math.round((i+1)/cmds.length*100)}% 🎨`);
+      if (delayMs > 0) await sleep(delayMs);
+    }
+  } finally {
+    ctx.restore();
+    actx.restore();
+  }
+  actx.clearRect(0, 0, W, H);
+  if (drawCancelled) throw new DOMException('cancelled', 'AbortError');
+}
+
+function showBrush(actx, cmd, W, H) {
+  actx.clearRect(0, 0, W, H);
+  let x = W/2, y = H/2;
+  if (cmd.x !== undefined) x = cmd.x + (cmd.w || 0) / 2;
+  if (cmd.cx !== undefined) x = cmd.cx;
+  if (cmd.x1 !== undefined) x = (cmd.x1 + cmd.x2) / 2;
+  if (cmd.cy !== undefined) y = cmd.cy;
+  if (cmd.y !== undefined) y = cmd.y + (cmd.h || 0) / 2;
+  if (cmd.y1 !== undefined) y = (cmd.y1 + cmd.y2) / 2;
+
+  actx.save();
+  actx.beginPath();
+  actx.arc(x, y, 20, 0, Math.PI * 2);
+  actx.fillStyle = 'rgba(255,255,255,0.8)';
+  actx.fill();
+  actx.beginPath();
+  actx.arc(x, y, 14, 0, Math.PI * 2);
+  actx.fillStyle = cmd.color || '#fff';
+  actx.fill();
+  actx.restore();
+}
+
+function drawCmd(ctx, cmd, W, H) {
+  ctx.save();
+  ctx.globalAlpha = cmd.alpha !== undefined ? cmd.alpha : 1;
+  switch (cmd.cmd) {
+    case 'background':
+      ctx.fillStyle = cmd.color; ctx.fillRect(0, 0, W, H); break;
+    case 'rect':
+      ctx.fillStyle = cmd.color; ctx.fillRect(cmd.x, cmd.y, cmd.w, cmd.h); break;
+    case 'circle':
+      ctx.beginPath(); ctx.arc(cmd.cx, cmd.cy, cmd.r, 0, Math.PI*2);
+      ctx.fillStyle = cmd.color; ctx.fill(); break;
+    case 'ellipse':
+      ctx.beginPath(); ctx.ellipse(cmd.cx, cmd.cy, cmd.rx, cmd.ry, 0, 0, Math.PI*2);
+      ctx.fillStyle = cmd.color; ctx.fill(); break;
+    case 'line':
+      ctx.beginPath(); ctx.moveTo(cmd.x1, cmd.y1); ctx.lineTo(cmd.x2, cmd.y2);
+      ctx.strokeStyle = cmd.color; ctx.lineWidth = cmd.width || 2; ctx.stroke(); break;
+    case 'arc':
+      ctx.beginPath(); ctx.arc(cmd.cx, cmd.cy, cmd.r, cmd.start, cmd.end);
+      ctx.strokeStyle = cmd.color; ctx.lineWidth = cmd.width || 2; ctx.stroke(); break;
+    case 'polygon':
+      if (!cmd.points?.length) break;
+      ctx.beginPath(); ctx.moveTo(cmd.points[0][0], cmd.points[0][1]);
+      for (let i=1; i<cmd.points.length; i++) ctx.lineTo(cmd.points[i][0], cmd.points[i][1]);
+      ctx.closePath();
+      if (cmd.fill !== false) { ctx.fillStyle = cmd.color; ctx.fill(); }
+      else { ctx.strokeStyle = cmd.color; ctx.lineWidth = 2; ctx.stroke(); }
+      break;
+    case 'curve':
+      if (!cmd.points || cmd.points.length < 4) break;
+      ctx.beginPath(); ctx.moveTo(cmd.points[0][0], cmd.points[0][1]);
+      ctx.bezierCurveTo(
+        cmd.points[1][0], cmd.points[1][1],
+        cmd.points[2][0], cmd.points[2][1],
+        cmd.points[3][0], cmd.points[3][1]
+      );
+      if (cmd.fill) { ctx.fillStyle = cmd.color; ctx.closePath(); ctx.fill(); }
+      else { ctx.strokeStyle = cmd.color; ctx.lineWidth = cmd.width || 2; ctx.stroke(); }
+      break;
+    case 'gradient_rect': {
+      const grd = cmd.dir === 'h'
+        ? ctx.createLinearGradient(cmd.x, cmd.y, cmd.x + cmd.w, cmd.y)
+        : ctx.createLinearGradient(cmd.x, cmd.y, cmd.x, cmd.y + cmd.h);
+      grd.addColorStop(0, cmd.color1); grd.addColorStop(1, cmd.color2);
+      ctx.fillStyle = grd; ctx.fillRect(cmd.x, cmd.y, cmd.w, cmd.h); break;
+    }
+  }
+  ctx.restore();
+}
+
+function sleep(ms) { return new Promise(r => setTimeout(r, ms)); }
+
+// ===== 「AIが考えています」アニメーション =====
+let thinkingRunning = false;
+let thinkingStartTime = 0;
+let thinkingSparkles = [];
+const thinkingMainChars = ['🎨', '🖌️', '✏️', '🖍️'];
+let thinkingMainCharIdx = 0;
+let thinkingMainCharSwapAt = 0;
+const thinkingFloatChars = ['🌈', '⭐', '💫', '✨', '🌟', '🎭', '🌸', '🍭', '🦄', '🍀', '🎀', '💖'];
+const thinkingOrbitChars = ['💭', '⭐', '✨', '🌟', '💫', '🎵'];
+const EMOJI_FONT = '"Apple Color Emoji","Segoe UI Emoji","Noto Color Emoji",serif';
+
+function makeSparkle(initialSpread) {
+  const W = animCanvas.width, H = animCanvas.height;
+  return {
+    x: Math.random() * W,
+    y: initialSpread ? Math.random() * H : H + Math.random() * 80,
+    vy: -1.2 - Math.random() * 1.8,
+    vx: (Math.random() - 0.5) * 0.6,
+    char: thinkingFloatChars[Math.floor(Math.random() * thinkingFloatChars.length)],
+    size: 22 + Math.random() * 26,
+    rot: Math.random() * Math.PI * 2,
+    vRot: (Math.random() - 0.5) * 0.06,
+    alpha: 0.7 + Math.random() * 0.3,
+    pulse: Math.random() * Math.PI * 2,
+  };
+}
+
+function startThinkingAnimation() {
+  if (thinkingRunning) return;
+  thinkingRunning = true;
+  thinkingStartTime = performance.now();
+  thinkingMainCharIdx = 0;
+  thinkingMainCharSwapAt = thinkingStartTime + 600;
+  thinkingSparkles = [];
+  for (let i = 0; i < 18; i++) thinkingSparkles.push(makeSparkle(true));
+  requestAnimationFrame(thinkingAnimLoop);
+}
+
+function stopThinkingAnimation() {
+  thinkingRunning = false;
+  actx.clearRect(0, 0, animCanvas.width, animCanvas.height);
+}
+
+function thinkingAnimLoop() {
+  if (!thinkingRunning) return;
+  const W = animCanvas.width, H = animCanvas.height;
+  const now = performance.now();
+  const t = (now - thinkingStartTime) / 1000;
+  const cx = W / 2, cy = H / 2;
+
+  actx.clearRect(0, 0, W, H);
+
+  // 1. 背景にカラフルな光の輪
+  for (let r = 0; r < 4; r++) {
+    const radius = 60 + r * 38 + Math.sin(t * 2 + r) * 12;
+    actx.beginPath();
+    actx.arc(cx, cy, radius, 0, Math.PI * 2);
+    actx.strokeStyle = 'hsla(' + ((t * 60 + r * 90) % 360) + ', 85%, 72%, ' + (0.32 - r * 0.06) + ')';
+    actx.lineWidth = 5;
+    actx.stroke();
+  }
+
+  // 2. 浮き上がるキラキラ
+  thinkingSparkles.forEach(function(s) {
+    s.x += s.vx; s.y += s.vy; s.rot += s.vRot; s.pulse += 0.1;
+    if (s.y < -60) Object.assign(s, makeSparkle(false));
+    actx.save();
+    actx.globalAlpha = s.alpha * (0.7 + Math.sin(s.pulse) * 0.3);
+    actx.translate(s.x, s.y);
+    actx.rotate(s.rot);
+    actx.font = s.size + 'px ' + EMOJI_FONT;
+    actx.textAlign = 'center';
+    actx.textBaseline = 'middle';
+    actx.fillText(s.char, 0, 0);
+    actx.restore();
+  });
+
+  // 3. 中央の主役キャラ（ぴょこぴょこ + 0.6秒ごとに切替）
+  if (now > thinkingMainCharSwapAt) {
+    thinkingMainCharIdx = (thinkingMainCharIdx + 1) % thinkingMainChars.length;
+    thinkingMainCharSwapAt = now + 600;
+  }
+  const bounce = -Math.abs(Math.sin(t * 4)) * 22;
+  const wobble = Math.sin(t * 3) * 0.18;
+  const mainSize = Math.min(W, H) * 0.28;
+  actx.save();
+  actx.translate(cx, cy + bounce);
+  actx.rotate(wobble);
+  actx.font = 'bold ' + mainSize + 'px ' + EMOJI_FONT;
+  actx.textAlign = 'center';
+  actx.textBaseline = 'middle';
+  actx.shadowColor = 'rgba(255, 215, 100, 0.8)';
+  actx.shadowBlur = 30;
+  actx.fillText(thinkingMainChars[thinkingMainCharIdx], 0, 0);
+  actx.restore();
+
+  // 4. 周回する思考バブル
+  const orbR = Math.min(W, H) * 0.32;
+  for (let i = 0; i < thinkingOrbitChars.length; i++) {
+    const a = t * 1.3 + i * (Math.PI * 2 / thinkingOrbitChars.length);
+    const wR = orbR + Math.sin(t * 2 + i) * 18;
+    const ox = cx + Math.cos(a) * wR;
+    const oy = cy + Math.sin(a) * wR + bounce / 2;
+    actx.save();
+    actx.translate(ox, oy);
+    actx.rotate(Math.sin(t * 2 + i) * 0.4);
+    const sz = 30 + Math.sin(t * 3 + i) * 8;
+    actx.font = sz + 'px ' + EMOJI_FONT;
+    actx.textAlign = 'center';
+    actx.textBaseline = 'middle';
+    actx.fillText(thinkingOrbitChars[i], 0, 0);
+    actx.restore();
+  }
+
+  // 5. ドット 3 つの跳ねるアニメーション
+  const dotY = cy + Math.min(W, H) * 0.38;
+  for (let i = 0; i < 3; i++) {
+    const dotPhase = t * 6 - i * 0.6;
+    const dotBounce = Math.max(0, Math.sin(dotPhase)) * 14;
+    actx.save();
+    actx.beginPath();
+    actx.arc(cx - 30 + i * 30, dotY - dotBounce, 8, 0, Math.PI * 2);
+    actx.fillStyle = 'hsl(' + ((t * 80 + i * 60) % 360) + ', 100%, 75%)';
+    actx.shadowColor = 'hsla(' + ((t * 80 + i * 60) % 360) + ', 100%, 75%, 0.8)';
+    actx.shadowBlur = 14;
+    actx.fill();
+    actx.restore();
+  }
+
+  requestAnimationFrame(thinkingAnimLoop);
+}
+
+// ウィンドウリサイズ時にcanvasを更新（描画中は無効）
+window.addEventListener('resize', () => { if (!drawing) resizeCanvases(); });
+
+// ===== タイトル2秒長押しで管理者画面（暗証番号つき） =====
+(function initFullscreenLongPress(){
+  const title = document.getElementById('app-title');
+  const progress = document.getElementById('fs-progress');
+  const toast = document.getElementById('fs-toast');
+  const HOLD_MS = 2000;
+
+  let pressTimer = null;
+  let rafId = null;
+  let pressStart = 0;
+  let triggered = false;
+
+  function showToast(msg) {
+    toast.textContent = msg;
+    toast.classList.add('show');
+    clearTimeout(showToast._t);
+    showToast._t = setTimeout(() => toast.classList.remove('show'), 1500);
+  }
+
+  function toggleFullscreen() {
+    // 長押し完了 → 管理者の暗証番号を聞く
+    AdminGate.open();
+  }
+
+  function tick() {
+    const elapsed = Date.now() - pressStart;
+    const pct = Math.min(100, (elapsed / HOLD_MS) * 100);
+    progress.style.width = pct + '%';
+    if (pct < 100 && pressTimer) {
+      rafId = requestAnimationFrame(tick);
+    }
+  }
+
+  function startPress(e) {
+    if (pressTimer || triggered) return;
+    e.preventDefault();
+    triggered = false;
+    pressStart = Date.now();
+    title.classList.add('pressing');
+    progress.style.width = '0%';
+    rafId = requestAnimationFrame(tick);
+    pressTimer = setTimeout(() => {
+      triggered = true;
+      toggleFullscreen();
+      cleanup();
+      // 次の操作に備えてフラグを戻す
+      setTimeout(() => { triggered = false; }, 500);
+    }, HOLD_MS);
+  }
+
+  function cleanup() {
+    if (pressTimer) { clearTimeout(pressTimer); pressTimer = null; }
+    if (rafId) { cancelAnimationFrame(rafId); rafId = null; }
+    title.classList.remove('pressing');
+    progress.style.width = '0%';
+  }
+
+  function cancelPress() {
+    if (!pressTimer) return;
+    cleanup();
+  }
+
+  // PC / タブレット両対応
+  title.addEventListener('pointerdown', startPress);
+  title.addEventListener('pointerup', cancelPress);
+  title.addEventListener('pointerleave', cancelPress);
+  title.addEventListener('pointercancel', cancelPress);
+
+  // 全画面変更時にキャンバスを再計算
+  document.addEventListener('fullscreenchange', () => {
+    setTimeout(() => { if (!drawing) resizeCanvases(); }, 100);
+  });
+})();
+
+
+// ===== スタート画面の処理 =====
+function selectVoice() {
+  document.getElementById('start-overlay').classList.add('hidden');
+  unlockAudio();
+  sendLog('INPUT_MODE', '音声入力が選択されました');
+  toggleVoice(); 
+}
+
+function selectKeyboard() {
+  document.getElementById('start-overlay').classList.add('hidden');
+  unlockAudio();
+  sendLog('INPUT_MODE', 'キーボード入力が選択されました');
+  document.getElementById('prompt').focus();
+}
+
+// ===== ローマ字→ひらがな変換 =====
+const ROMAJI_TO_HIRAGANA = {
+  kya:'きゃ', kyu:'きゅ', kyo:'きょ', gya:'ぎゃ', gyu:'ぎゅ', gyo:'ぎょ',
+  sha:'しゃ', shu:'しゅ', sho:'しょ', sya:'しゃ', syu:'しゅ', syo:'しょ',
+  ja:'じゃ', ju:'じゅ', jo:'じょ', jya:'じゃ', jyu:'じゅ', jyo:'じょ',
+  zya:'じゃ', zyu:'じゅ', zyo:'じょ', cha:'ちゃ', chu:'ちゅ', cho:'ちょ',
+  cya:'ちゃ', cyu:'ちゅ', cyo:'ちょ', tya:'ちゃ', tyu:'ちゅ', tyo:'ちょ',
+  dya:'ぢゃ', dyu:'ぢゅ', dyo:'ぢょ', nya:'にゃ', nyu:'にゅ', nyo:'にょ',
+  hya:'ひゃ', hyu:'ひゅ', hyo:'ひょ', bya:'びゃ', byu:'びゅ', byo:'びょ',
+  pya:'ぴゃ', pyu:'ぴゅ', pyo:'ぴょ', mya:'みゃ', myu:'みゅ', myo:'みょ',
+  rya:'りゃ', ryu:'りゅ', ryo:'りょ', fa:'ふぁ', fi:'ふぃ', fe:'ふぇ', fo:'ふぉ',
+  va:'ゔぁ', vi:'ゔぃ', vu:'ゔ', ve:'ゔぇ', vo:'ゔぉ',
+  wi:'うぃ', we:'うぇ', wha:'うぁ', whi:'うぃ', whe:'うぇ', who:'うぉ',
+  tsa:'つぁ', tsi:'つぃ', tse:'つぇ', tso:'つぉ',
+  thi:'てぃ', thu:'てゅ', dhi:'でぃ', dhu:'でゅ',
+  a:'あ', i:'い', u:'う', e:'え', o:'お',
+  ka:'か', ki:'き', ku:'く', ke:'け', ko:'こ',
+  ga:'が', gi:'ぎ', gu:'ぐ', ge:'げ', go:'ご',
+  sa:'さ', si:'し', shi:'し', su:'す', se:'せ', so:'そ',
+  za:'ざ', zi:'じ', ji:'じ', zu:'ず', ze:'ぜ', zo:'ぞ',
+  ta:'た', ti:'ち', chi:'ち', tu:'つ', tsu:'つ', te:'て', to:'と',
+  da:'だ', di:'ぢ', du:'づ', de:'で', do:'ど',
+  na:'な', ni:'に', nu:'ぬ', ne:'ね', no:'の',
+  ha:'は', hi:'ひ', hu:'ふ', fu:'ふ', he:'へ', ho:'ほ',
+  ba:'ば', bi:'び', bu:'ぶ', be:'べ', bo:'ぼ',
+  pa:'ぱ', pi:'ぴ', pu:'ぷ', pe:'ぺ', po:'ぽ',
+  ma:'ま', mi:'み', mu:'む', me:'め', mo:'も',
+  ya:'や', yu:'ゆ', yo:'よ',
+  ra:'ら', ri:'り', ru:'る', re:'れ', ro:'ろ',
+  wa:'わ', wo:'を', n:'ん',
+  // 小書き文字（自作キーボードの「小さい文字」ボタンが x+ローマ字 を送ってくる）
+  // l 始まりは一般的なIMEに合わせた別名。3文字までしか照合しないので xtsu/ltsu は入れない。
+  xa:'ぁ', xi:'ぃ', xu:'ぅ', xe:'ぇ', xo:'ぉ',
+  la:'ぁ', li:'ぃ', lu:'ぅ', le:'ぇ', lo:'ぉ',
+  xya:'ゃ', xyu:'ゅ', xyo:'ょ', lya:'ゃ', lyu:'ゅ', lyo:'ょ',
+  xtu:'っ', ltu:'っ', xwa:'ゎ', lwa:'ゎ'
+};
+const ROMAJI_PREFIXES = new Set();
+Object.keys(ROMAJI_TO_HIRAGANA).forEach(key => {
+  for (let i = 1; i < key.length; i++) ROMAJI_PREFIXES.add(key.slice(0, i));
+});
+// 「nn」は "ん" で確定か "ん"＋な行かが次の1文字まで決まらないので保留扱いにする
+ROMAJI_PREFIXES.add('nn');
+let romajiBuffer = '';
+let isNormalizingPrompt = false;
+
+function katakanaToHiragana(text) {
+  return text.replace(/[ァ-ヶ]/g, ch => String.fromCharCode(ch.charCodeAt(0) - 0x60));
+}
+function normalizeAscii(text) {
+  return text.replace(/[Ａ-Ｚａ-ｚ]/g, ch => String.fromCharCode(ch.charCodeAt(0) - 0xfee0));
+}
+function romajiToHiragana(text, keepPending = false) {
+  let src = normalizeAscii(text).toLowerCase();
+  let out = '';
+  for (let i = 0; i < src.length;) {
+    const ch = src[i];
+    if (!/[a-z]/.test(ch)) { out += ch; i++; continue; }
+    if (i + 1 < src.length && ch === src[i + 1] && !'aeioun'.includes(ch)) { out += 'っ'; i++; continue; }
+    // ===== 「nn」の処理（「ん」が二重に出るバグ対策）=====
+    // nn の次に来る文字で、n を1つ消費するか2つ消費するかが変わる。
+    //   nn + 母音 → n を1つだけ消費（onna→おんな / konnichiha→こんにちは）
+    //   nn + 子音/y/終端 → n を2つとも消費（honnya→ほんや / nn→ん）
+    if (ch === 'n' && src[i + 1] === 'n') {
+      const after = src[i + 2];
+      if (after === undefined) {
+        // まだ次の文字が来ていない＝どちらか確定できないので保留する。
+        // 確定（変換終了）のタイミングでは「ん」1文字にする。
+        if (keepPending) { out += 'nn'; break; }
+        out += 'ん'; i += 2; continue;
+      }
+      out += 'ん';
+      i += 'aiueo'.includes(after) ? 1 : 2;
+      continue;
+    }
+    if (keepPending && ch === 'n' && i === src.length - 1) { out += ch; break; }
+    let matched = '';
+    for (let len = 3; len >= 1; len--) {
+      const part = src.slice(i, i + len);
+      if (ROMAJI_TO_HIRAGANA[part]) { matched = part; break; }
+    }
+    if (matched) { out += ROMAJI_TO_HIRAGANA[matched]; i += matched.length; continue; }
+    if (ch === 'n') {
+      const next = src[i + 1] || '';
+      if (!next || !'aiueoyn'.includes(next)) { out += 'ん'; i++; continue; }
+    }
+    const rest = src.slice(i);
+    if (keepPending && ROMAJI_PREFIXES.has(rest)) { out += rest; break; }
+    i++;
+  }
+  return out;
+}
+function consumeRomajiKey(key) {
+  romajiBuffer += normalizeAscii(key).toLowerCase();
+  const converted = romajiToHiragana(romajiBuffer, true);
+  const pendingMatch = converted.match(/[a-z]+$/);
+  const pending = pendingMatch && ROMAJI_PREFIXES.has(pendingMatch[0]) ? pendingMatch[0] : '';
+  const committed = pending ? converted.slice(0, -pending.length) : converted;
+  romajiBuffer = pending;
+  if (committed) insertAtPromptCursor(toHiraganaOnly(committed));
+}
+function toHiraganaOnly(text, keepPending = false) {
+  const hira = katakanaToHiragana(romajiToHiragana(text, keepPending));
+  return hira
+    .replace(/[ァ-ヴｦ-ﾟ]/g, '')
+    .replace(/[A-Za-zＡ-Ｚａ-ｚ]/g, '')
+    .replace(/[^ぁ-ゖ゙゚ー\s、。！？!?]/g, '');
+}
+function normalizePromptInput(keepPending = false) {
+  if (isNormalizingPrompt) return;
+  const current = promptInput.value;
+  const normalized = toHiraganaOnly(current, keepPending);
+  if (current === normalized) return;
+  const oldPos = promptInput.selectionStart;
+  isNormalizingPrompt = true;
+  promptInput.value = normalized;
+  if (typeof oldPos === 'number') promptInput.setSelectionRange(Math.min(normalized.length, oldPos), Math.min(normalized.length, oldPos));
+  isNormalizingPrompt = false;
+}
+function insertAtPromptCursor(text) {
+  // AIが絵を描いている間は入力欄をさわらせない。
+  // promptInput.disabled だけでは JS からの value 書き換えは止まらないため、ここでも塞ぐ。
+  if (drawing) return;
+  promptInput.focus();
+  const start = promptInput.selectionStart;
+  const end = promptInput.selectionEnd;
+  if (typeof start === 'number' && typeof end === 'number') {
+    const v = promptInput.value;
+    promptInput.value = v.slice(0, start) + text + v.slice(end);
+    const pos = start + text.length;
+    promptInput.setSelectionRange(pos, pos);
+  } else {
+    promptInput.value += text;
+  }
+  promptInput.dispatchEvent(new Event('input', { bubbles: true }));
+}
+function flushRomajiBuffer() {
+  if (!romajiBuffer) return;
+  const hira = toHiraganaOnly(romajiBuffer);
+  romajiBuffer = '';
+  if (hira) insertAtPromptCursor(hira);
+}
+
+// ===== キーボード入力（ローマ字変換 + グローバルフォーカス） =====
+(function initGlobalKeyboardListener() {
+  let isComposing = false;
+
+  promptInput.addEventListener('compositionstart', () => { isComposing = true; romajiBuffer = ''; });
+  promptInput.addEventListener('compositionend', () => { isComposing = false; normalizePromptInput(false); });
+
+  promptInput.addEventListener('keydown', (e) => {
+    if (drawing) { e.preventDefault(); return; }          // 描画中は文字入力させない
+    if (e.ctrlKey || e.altKey || e.metaKey || isComposing || e.isComposing || e.keyCode === 229) return;
+    if (/^[a-zA-ZＡ-Ｚａ-ｚ]$/.test(e.key)) {
+      e.preventDefault();
+      consumeRomajiKey(e.key);
+      return;
+    }
+    if (e.key === 'Backspace' && romajiBuffer) {
+      e.preventDefault();
+      romajiBuffer = romajiBuffer.slice(0, -1);
+      return;
+    }
+    if (e.key.length !== 1) { if (e.key !== 'Shift') flushRomajiBuffer(); return; }
+    flushRomajiBuffer();
+  });
+
+  promptInput.addEventListener('input', () => { if (!isComposing) normalizePromptInput(true); });
+  promptInput.addEventListener('paste', () => { romajiBuffer = ''; setTimeout(() => normalizePromptInput(false), 0); });
+
+  document.addEventListener('keydown', (e) => {
+    if (drawing) return;                                  // 描画中は文字入力させない
+    if (e.ctrlKey || e.altKey || e.metaKey || isComposing || e.isComposing || e.keyCode === 229) return;
+    if (document.activeElement === promptInput) return;
+    const ignoredKeys = ['Enter', 'Tab', 'Escape', 'F1', 'F2', 'F3', 'F4', 'F5'];
+    if (ignoredKeys.includes(e.key)) return;
+    if (e.key.length === 1 || e.key === 'Backspace' || e.key === ' ') {
+      e.preventDefault();
+      promptInput.focus();
+      if (/^[a-zA-ZＡ-Ｚａ-ｚ]$/.test(e.key)) consumeRomajiKey(e.key);
+      else if (e.key.length === 1) insertAtPromptCursor(toHiraganaOnly(e.key));
+    }
+  });
+
+  document.addEventListener('keypress', (e) => {
+    if (document.activeElement !== promptInput && !drawing) { e.preventDefault(); promptInput.focus(); }
+  });
+})();
+
+resizeCanvases();
+
+// ===== 起動ローディング：ネット＋マイク確認 =====
+(function() {
+  const overlay  = document.getElementById('loading-overlay');
+  const statusEl = document.getElementById('loading-status');
+  const iconEl   = document.getElementById('loading-icon');
+
+  function sleep(ms) { return new Promise(r => setTimeout(r, ms)); }
+
+  function fadeOut() {
+    overlay.classList.add('hidden');
+    setTimeout(() => { overlay.style.display = 'none'; }, 700);
+  }
+
+  // Step1: ネット確認（最大60秒）
+  async function waitForNetwork() {
+    for (let i = 0; i < 30; i++) {
+      try {
+        const res  = await fetch('/api/ready', { cache: 'no-store' });
+        const data = await res.json();
+        if (data.ready)        return true;
+        if (!data.network)     statusEl.textContent = 'ネットワークをまっています... 🌐';
+        else if (!data.api_key) statusEl.textContent = 'APIキーがみつかりません ⚠️';
+      } catch(e) {
+        statusEl.textContent = 'サーバーにせつぞくちゅう... 🔄';
+      }
+      await sleep(2000);
+    }
+    return false;
+  }
+
+  // Step2: マイク確認（最大30秒）
+  async function waitForMic() {
+    if (!navigator.mediaDevices?.getUserMedia) return false;
+    for (let m = 0; m < 15; m++) {
+      try {
+        const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+        stream.getTracks().forEach(t => t.stop());
+        return true;
+      } catch(e) {
+        // NotAllowedError は何度待っても解決しないので即終了
+        if (e.name === 'NotAllowedError') return false;
+      }
+      await sleep(2000);
+    }
+    return false;
+  }
+
+  async function run() {
+    // リロード（最初からボタン）の場合はチェック済みなのでスキップ
+    if (sessionStorage.getItem('startupCheckDone')) {
+      fadeOut();
+      return;
+    }
+
+    // --- ネット確認 ---
+    statusEl.textContent = 'ネットワークをかくにんしています... 🌐';
+    const netOk = await waitForNetwork();
+    if (!netOk) {
+      iconEl.textContent  = '⚠️';
+      statusEl.textContent = 'ネットワークにつながっていないかも';
+      await sleep(2000);
+      sessionStorage.setItem('startupCheckDone', '1');
+      fadeOut();
+      return;
+    }
+
+    // --- マイク確認 ---
+    statusEl.textContent = 'マイクをかくにんしています... 🎤';
+    const micOk = await waitForMic();
+
+    // --- 完了 ---
+    iconEl.textContent   = '✅';
+    statusEl.textContent = micOk ? 'じゅんびOK！' : 'じゅんびOK！（マイクはキーボード入力画面で）';
+    await sleep(micOk ? 600 : 1500);
+    sessionStorage.setItem('startupCheckDone', '1');
+    fadeOut();
+  }
+
+  run();
+})();
+</script>
+
+<!-- ===== 管理者 PIN 入力 ===== -->
+<div id="pin-overlay" aria-hidden="true">
+  <div id="pin-box">
+    <h2>🔒 管理者の暗証番号</h2>
+    <div id="pin-dots"><span></span><span></span><span></span><span></span></div>
+    <div id="pin-msg"></div>
+    <div id="pin-keys">
+      <button data-k="1">1</button><button data-k="2">2</button><button data-k="3">3</button>
+      <button data-k="4">4</button><button data-k="5">5</button><button data-k="6">6</button>
+      <button data-k="7">7</button><button data-k="8">8</button><button data-k="9">9</button>
+      <button data-k="C" class="sub">クリア</button><button data-k="0">0</button><button data-k="B" class="sub">⌫</button>
+    </div>
+    <button id="pin-cancel" type="button">キャンセル</button>
+  </div>
+</div>
+
+<!-- ===== 管理画面（画面内） ===== -->
+<div id="admin-overlay" aria-hidden="true">
+  <div id="admin-panel">
+    <div id="admin-head">
+      <span class="grow">⚙ 管理者画面</span>
+      <button id="admin-home" type="button">管理画面トップ</button>
+      <button id="admin-close" type="button">✕ 閉じる</button>
+    </div>
+    <iframe id="admin-frame" title="管理者画面"></iframe>
+  </div>
+</div>
+
+<script>
+// ===== 画面ロック（キオスク）：ボタン以外の操作を無効化 =====
+(function kioskLock() {
+  const editable = (el) => el && el.closest && el.closest('input, textarea, [contenteditable="true"]');
+  // 右クリック・長押しメニュー・ドラッグ・文字選択
+  document.addEventListener('contextmenu', (e) => e.preventDefault(), true);
+  document.addEventListener('dragstart', (e) => e.preventDefault(), true);
+  document.addEventListener('selectstart', (e) => { if (!editable(e.target)) e.preventDefault(); }, true);
+  // Ctrl+ホイール / ピンチでの拡大
+  document.addEventListener('wheel', (e) => { if (e.ctrlKey) e.preventDefault(); }, { passive: false, capture: true });
+  ['gesturestart', 'gesturechange', 'gestureend'].forEach((t) =>
+    document.addEventListener(t, (e) => e.preventDefault(), { passive: false }));
+  document.addEventListener('touchmove', (e) => { if (e.touches && e.touches.length > 1) e.preventDefault(); }, { passive: false });
+  // ブラウザのショートカット（更新・印刷・検索・拡大・戻る など）
+  const SOLO = ['F1', 'F3', 'F5', 'F7', 'F11', 'F12', 'ContextMenu',
+                'BrowserBack', 'BrowserForward', 'BrowserRefresh', 'BrowserHome', 'BrowserSearch', 'BrowserFavorites'];
+  window.addEventListener('keydown', (e) => {
+    const ctrl = e.ctrlKey || e.metaKey;
+    if (SOLO.includes(e.key)
+        || (ctrl && /^[rwntposulhjfdgkqimb0=+\-]$/i.test(e.key))
+        || (e.altKey && ['ArrowLeft', 'ArrowRight', 'Home'].includes(e.key))) {
+      e.preventDefault();
+      e.stopImmediatePropagation();
+    }
+  }, true);
+  // 「戻る」でページを離れさせない
+  history.pushState(null, '', location.href);
+  window.addEventListener('popstate', () => history.pushState(null, '', location.href));
+})();
+
+// ===== 管理者：タイトル長押し → 暗証番号 → 管理画面 =====
+const AdminGate = (function () {
+  const pinOverlay = document.getElementById('pin-overlay');
+  const pinBox = document.getElementById('pin-box');
+  const dots = [...document.querySelectorAll('#pin-dots span')];
+  const msg = document.getElementById('pin-msg');
+  const adminOverlay = document.getElementById('admin-overlay');
+  const frame = document.getElementById('admin-frame');
+  const IDLE_CLOSE_MS = 3 * 60 * 1000;   // 3分さわらなければ管理画面を自動で閉じる
+  let pin = '', busy = false, token = '', idleTimer = null;
+
+  function render() { dots.forEach((d, i) => d.classList.toggle('on', i < pin.length)); }
+  function openPin() {
+    pin = ''; msg.textContent = ''; render();
+    pinOverlay.classList.add('show');
+    window.addEventListener('keydown', onKey, true);
+  }
+  function closePin() {
+    pinOverlay.classList.remove('show');
+    window.removeEventListener('keydown', onKey, true);
+  }
+  function onKey(e) {
+    // PIN 入力中は、お題入力欄に文字が入らないようここで止める
+    e.preventDefault(); e.stopImmediatePropagation();
+    if (/^[0-9]$/.test(e.key)) press(e.key);
+    else if (e.key === 'Backspace') press('B');
+    else if (e.key === 'Escape') closePin();
+  }
+  function press(k) {
+    if (busy) return;
+    if (k === 'C') pin = '';
+    else if (k === 'B') pin = pin.slice(0, -1);
+    else if (pin.length < 4) pin += k;
+    msg.textContent = ''; render();
+    if (pin.length === 4) submit();
+  }
+  async function submit() {
+    busy = true;
+    try {
+      const res = await fetch('/api/admin/verify-pin', {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ pin }),
+      });
+      const data = await res.json().catch(() => ({}));
+      if (data.ok) { token = data.token; closePin(); openAdmin(data.mode); return; }
+      msg.textContent = res.status === 429
+        ? `しばらく待ってください（${data.wait || 30}秒）` : '暗証番号がちがいます';
+      pinBox.classList.remove('shake'); void pinBox.offsetWidth; pinBox.classList.add('shake');
+    } catch (_) {
+      msg.textContent = 'サーバーに接続できません';
+    } finally {
+      pin = ''; render(); busy = false;
+    }
+  }
+
+  function openAdmin(mode) {
+    // 従来のアプリウィンドウ（pywebview）なら、別ウィンドウの管理画面を開く
+    if (mode === 'window' && window.pywebview && window.pywebview.api && window.pywebview.api.open_admin) {
+      try { window.pywebview.api.open_admin(); return; } catch (_) {}
+    }
+    loadAdminTop();
+    adminOverlay.classList.add('show');
+    bumpIdle();
+  }
+  function loadAdminTop() { frame.src = '/admin.html?embedded=1&token=' + encodeURIComponent(token); }
+  function closeAdmin() {
+    adminOverlay.classList.remove('show');
+    frame.src = 'about:blank';
+    clearTimeout(idleTimer);
+  }
+  function bumpIdle() {
+    clearTimeout(idleTimer);
+    idleTimer = setTimeout(closeAdmin, IDLE_CLOSE_MS);
+  }
+  frame.addEventListener('load', () => {
+    try {
+      const w = frame.contentWindow;
+      ['pointerdown', 'keydown', 'input'].forEach((t) => w.addEventListener(t, bumpIdle, true));
+      w.document.addEventListener('contextmenu', (e) => e.preventDefault(), true);
+    } catch (_) {}
+  });
+
+  document.querySelectorAll('#pin-keys button').forEach((b) =>
+    b.addEventListener('click', () => press(b.dataset.k)));
+  document.getElementById('pin-cancel').addEventListener('click', closePin);
+  document.getElementById('admin-close').addEventListener('click', closeAdmin);
+  document.getElementById('admin-home').addEventListener('click', () => { loadAdminTop(); bumpIdle(); });
+
+  return { open: openPin };
+})();
+</script>
+</body>
+</html>

@@ -1,0 +1,557 @@
+<!doctype html>
+<html lang="ja">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>管理者画面</title>
+  <style>
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+    html, body {
+      height: 100%;
+      font-family: system-ui, -apple-system, "Segoe UI", sans-serif;
+      background: #f0f4f8;
+      color: #1f2937;
+      font-size: 14px;
+    }
+    body { padding: 14px; overflow-y: auto; }
+
+    h1 {
+      font-size: 18px;
+      font-weight: 800;
+      margin-bottom: 12px;
+      color: #1e3a5f;
+    }
+
+    /* ステータスバッジ */
+    #status-badge {
+      display: inline-flex;
+      align-items: center;
+      gap: 6px;
+      padding: 4px 10px;
+      border-radius: 99px;
+      font-size: 12px;
+      font-weight: 700;
+      margin-bottom: 12px;
+      background: #e2e8f0;
+      color: #475569;
+      transition: background 0.3s, color 0.3s;
+    }
+    #status-badge.thinking { background: #fef3c7; color: #92400e; }
+    #status-badge.drawing  { background: #d1fae5; color: #065f46; }
+    #status-badge .dot {
+      width: 8px; height: 8px;
+      border-radius: 50%;
+      background: currentColor;
+    }
+    #status-badge.thinking .dot { animation: pulse 1s infinite; }
+    #status-badge.drawing  .dot { animation: pulse 0.6s infinite; }
+    @keyframes pulse {
+      0%, 100% { opacity: 1; } 50% { opacity: 0.3; }
+    }
+
+    /* カードセクション */
+    .card {
+      background: #fff;
+      border-radius: 10px;
+      padding: 14px;
+      margin-bottom: 10px;
+      box-shadow: 0 1px 4px rgba(0,0,0,0.08);
+    }
+    .card-title {
+      font-size: 12px;
+      font-weight: 700;
+      text-transform: uppercase;
+      letter-spacing: 0.05em;
+      color: #94a3b8;
+      margin-bottom: 10px;
+    }
+
+    /* フォームパーツ共通 */
+    label { display: block; font-weight: 600; font-size: 13px; margin-bottom: 4px; }
+    select, input[type="range"] { width: 100%; }
+    select {
+      padding: 8px 10px;
+      border: 1px solid #cbd5e1;
+      border-radius: 6px;
+      background: #fff;
+      font: inherit;
+      cursor: pointer;
+    }
+    input[type="range"] {
+      accent-color: #2563eb;
+      cursor: pointer;
+      height: 20px;
+    }
+    .range-row {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+    }
+    .range-row input { flex: 1; }
+    .range-val {
+      min-width: 36px;
+      text-align: right;
+      font-weight: 700;
+      color: #2563eb;
+      font-size: 13px;
+    }
+
+    /* トグルスイッチ */
+    .toggle-row {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      margin-bottom: 10px;
+    }
+    .toggle-label { font-weight: 600; font-size: 13px; }
+    .toggle {
+      position: relative;
+      width: 44px; height: 24px;
+    }
+    .toggle input { opacity: 0; width: 0; height: 0; }
+    .toggle-slider {
+      position: absolute;
+      inset: 0;
+      background: #cbd5e1;
+      border-radius: 99px;
+      cursor: pointer;
+      transition: background 0.2s;
+    }
+    .toggle-slider::before {
+      content: '';
+      position: absolute;
+      width: 18px; height: 18px;
+      left: 3px; top: 3px;
+      background: #fff;
+      border-radius: 50%;
+      transition: transform 0.2s;
+      box-shadow: 0 1px 3px rgba(0,0,0,0.2);
+    }
+    .toggle input:checked + .toggle-slider { background: #2563eb; }
+    .toggle input:checked + .toggle-slider::before { transform: translateX(20px); }
+
+    /* ボタン */
+    .btn {
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      gap: 6px;
+      width: 100%;
+      padding: 10px 12px;
+      border: 0;
+      border-radius: 7px;
+      font: inherit;
+      font-weight: 700;
+      font-size: 13px;
+      cursor: pointer;
+      transition: filter 0.15s;
+    }
+    .btn:hover { filter: brightness(0.92); }
+    .btn:active { filter: brightness(0.84); }
+    .btn-primary   { background: #2563eb; color: #fff; }
+    .btn-secondary { background: #475569; color: #fff; }
+    .btn-success   { background: #059669; color: #fff; }
+    .btn-outline   { background: #fff; color: #374151; border: 1.5px solid #d1d5db; }
+    .btn-danger    { background: #dc2626; color: #fff; }
+    .btn-sm { padding: 7px 10px; font-size: 12px; }
+
+    .btn-row {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 8px;
+      margin-top: 8px;
+    }
+
+    /* セパレーター */
+    .sep { height: 1px; background: #f1f5f9; margin: 10px 0; }
+
+    /* ログ */
+    #log-list {
+      max-height: 140px;
+      overflow-y: auto;
+      font-size: 11px;
+      font-family: "Consolas", "Courier New", monospace;
+      line-height: 1.5;
+      color: #475569;
+    }
+    #log-list .log-entry { padding: 2px 0; border-bottom: 1px solid #f1f5f9; }
+    #log-list .log-entry .t  { color: #94a3b8; }
+    #log-list .log-entry .tp { font-weight: 700; }
+    #log-list .log-entry .tp.DRAW_START   { color: #2563eb; }
+    #log-list .log-entry .tp.DRAW_SUCCESS { color: #059669; }
+    #log-list .log-entry .tp.DRAW_ERROR   { color: #dc2626; }
+
+    /* フラッシュメッセージ */
+    #flash {
+      position: fixed;
+      bottom: 14px;
+      left: 50%;
+      transform: translateX(-50%);
+      background: #1e3a5f;
+      color: #fff;
+      padding: 8px 18px;
+      border-radius: 99px;
+      font-size: 12px;
+      font-weight: 700;
+      opacity: 0;
+      pointer-events: none;
+      transition: opacity 0.3s;
+      white-space: nowrap;
+    }
+    #flash.show { opacity: 1; }
+  </style>
+</head>
+<body>
+  <h1>⚙️ 管理者画面</h1>
+  <div id="status-badge"><span class="dot"></span><span id="status-text">待機中</span></div>
+
+  <!-- BGM -->
+  <div class="card">
+    <div class="card-title">🎵 BGM</div>
+    <div class="toggle-row">
+      <span class="toggle-label">BGM ON / OFF</span>
+      <label class="toggle">
+        <input type="checkbox" id="bgmEnabled" checked onchange="onBgmToggle()">
+        <span class="toggle-slider"></span>
+      </label>
+    </div>
+    <label for="bgmVolume">音量</label>
+    <div class="range-row">
+      <input type="range" id="bgmVolume" min="0" max="100" value="80" oninput="onVolumeInput()">
+      <span class="range-val" id="bgmVolumeVal">80%</span>
+    </div>
+    <div class="btn-row" id="bgmTestRow">
+      <button class="btn btn-outline btn-sm" onclick="testBgm('BGM/BGM1.mp3','BGM1')">▶ BGM1 試聴</button>
+    </div>
+    <div id="bgmHint" style="font-size:12px;opacity:.7;margin-top:6px;">
+      考え中BGMは上の曲からランダムで再生されます（BGMフォルダに BGM3.mp3 などを追加すると自動で増えます）
+    </div>
+  </div>
+
+  <!-- 描画スピード -->
+  <div class="card">
+    <div class="card-title">🖌️ 描画スピード</div>
+    <label for="drawSpeed">スピード</label>
+    <div class="range-row">
+      <input type="range" id="drawSpeed" min="0" max="4" step="1" value="2" oninput="onSpeedInput()">
+      <span class="range-val" id="drawSpeedVal">普通</span>
+    </div>
+    <div style="display:flex;justify-content:space-between;font-size:11px;color:#94a3b8;margin-top:2px;">
+      <span>即時</span><span>速い</span><span>普通</span><span>遅い</span><span>超遅</span>
+    </div>
+  </div>
+
+  <!-- AIモデル / 温度 -->
+  <div class="card">
+    <div class="card-title">🤖 AI設定</div>
+    <label for="modelSelect">Gemini モデル</label>
+    <select id="modelSelect" style="margin-bottom:10px;"></select>
+
+    <label for="aiTemp">個性（温度）</label>
+    <div class="range-row">
+      <input type="range" id="aiTemp" min="0.3" max="1.5" step="0.05" value="0.85" oninput="onTempInput()">
+      <span class="range-val" id="aiTempVal">0.85</span>
+    </div>
+    <div style="display:flex;justify-content:space-between;font-size:11px;color:#94a3b8;margin-top:2px;">
+      <span>安定</span><span style="margin-left:auto">クリエイティブ</span>
+    </div>
+    <div style="font-size:11px;color:#94a3b8;margin-top:4px;">
+      推奨 0.85。1.2以上にすると形や色が崩れて絵の品質が大きく落ちます。
+    </div>
+    <div style="margin-top:10px;">
+      <button id="saveAiBtn" class="btn btn-primary" onclick="saveAiSettings()">💾 AI設定を保存</button>
+    </div>
+  </div>
+
+  <!-- ログ -->
+  <div class="card">
+    <div class="card-title">📋 最近のログ <button class="btn btn-outline btn-sm" style="width:auto;float:right;" onclick="loadLogs()">更新</button></div>
+    <div id="log-list"><span style="color:#94a3b8;">読み込み中...</span></div>
+  </div>
+
+  <!-- 操作 -->
+  <div class="card">
+    <div class="card-title">🛠 操作</div>
+    <div style="display:grid;gap:8px;">
+      <button class="btn btn-secondary" onclick="openDebug()">🔍 デバッグブラウザを開く</button>
+      <button class="btn btn-danger" onclick="shutdownApp()">⏹ AIソフトを閉じる</button>
+    </div>
+  </div>
+
+  <div id="flash"></div>
+
+  <audio id="testAudio" preload="none"></audio>
+
+  <script>
+    let settings = {};
+    let saveTimer = null;
+
+    // ===== API ラッパー =====
+    // 従来のアプリウィンドウ(pywebview)では window.pywebview.api、
+    // ブラウザ（Chrome キオスク）では HTTP API を使う。HTTP は暗証番号で発行したトークンが必要。
+    const PARAMS = new URLSearchParams(location.search);
+    const ADMIN_TOKEN = PARAMS.get('token') || '';
+    const EMBEDDED = PARAMS.get('embedded') === '1';
+
+    async function http(method, url, body) {
+      const res = await fetch(url, {
+        method,
+        headers: { 'Content-Type': 'application/json', 'X-Admin-Token': ADMIN_TOKEN },
+        body: body ? JSON.stringify(body) : undefined,
+      });
+      if (res.status === 403) throw new Error('暗証番号の認証が切れました。開き直してください');
+      if (!res.ok) throw new Error('HTTP ' + res.status);
+      return res.json();
+    }
+    const httpApi = {
+      get_settings: () => http('GET', '/api/admin/settings'),
+      set_model: (model) => http('POST', '/api/admin/settings', { model }),
+      set_bgm: (enabled, volume) => http('POST', '/api/admin/settings', { bgm_enabled: enabled, bgm_volume: volume }),
+      set_speed: (speed) => http('POST', '/api/admin/settings', { draw_speed: speed }),
+      set_temperature: (t) => http('POST', '/api/admin/settings', { ai_temperature: t }),
+      get_logs: async () => (await http('GET', '/api/admin/logs')).logs,
+      open_debug: async () => {
+        const r = await http('POST', '/api/admin/open-debug');
+        if (r.status === 'inline') location.href = r.url;   // キオスク中は管理画面の中で開く
+        return r;
+      },
+      shutdown: () => http('POST', '/api/admin/shutdown'),
+    };
+    function api() {
+      if (window.pywebview && window.pywebview.api) return window.pywebview.api;
+      if (ADMIN_TOKEN) return httpApi;
+      throw new Error('pywebview API が利用できません');
+    }
+
+    // ===== フラッシュ =====
+    function flash(msg) {
+      const el = document.getElementById('flash');
+      el.textContent = msg;
+      el.classList.add('show');
+      setTimeout(() => el.classList.remove('show'), 2500);
+    }
+
+    // ===== ステータス =====
+    const STATUS_LABELS = { idle: '待機中', thinking: '🤔 考え中...', drawing: '🎨 描画中...' };
+    const STATUS_CLASSES = { idle: '', thinking: 'thinking', drawing: 'drawing' };
+    function updateStatusBadge(status) {
+      const badge = document.getElementById('status-badge');
+      badge.id = 'status-badge';
+      badge.className = STATUS_CLASSES[status] || '';
+      document.getElementById('status-text').textContent = STATUS_LABELS[status] || status;
+    }
+
+    // ===== 設定を画面に反映 =====
+    function applySettings(s) {
+      settings = s;
+      document.getElementById('bgmEnabled').checked = s.bgm_enabled !== false;
+      document.getElementById('bgmVolume').value = s.bgm_volume ?? 80;
+      document.getElementById('bgmVolumeVal').textContent = (s.bgm_volume ?? 80) + '%';
+      document.getElementById('drawSpeed').value = s.draw_speed ?? 2;
+      updateSpeedLabel(s.draw_speed ?? 2);
+      document.getElementById('aiTemp').value = s.ai_temperature ?? 0.85;
+      document.getElementById('aiTempVal').textContent = (+(s.ai_temperature ?? 0.85)).toFixed(2);
+      updateStatusBadge(s.draw_status || 'idle');
+
+      const sel = document.getElementById('modelSelect');
+      const models = s.models || [];
+      const current = s.model || '';
+      sel.innerHTML = '';
+      if (models.length > 0) {
+        models.forEach(m => {
+          const opt = document.createElement('option');
+          opt.value = m; opt.textContent = m;
+          if (m === current) opt.selected = true;
+          sel.appendChild(opt);
+        });
+      } else {
+        sel.innerHTML = '<option value="">（モデルなし）</option>';
+      }
+    }
+
+    // ===== 設定読み込み =====
+    async function loadSettings() {
+      try {
+        const s = await api().get_settings();
+        applySettings(s);
+      } catch (e) {
+        console.warn('設定読み込み失敗:', e);
+        flash('⚠ 設定読み込み失敗: ' + e.message);
+      }
+    }
+
+    // ===== BGM トグル =====
+    function onBgmToggle() {
+      const enabled = document.getElementById('bgmEnabled').checked;
+      const vol = parseInt(document.getElementById('bgmVolume').value);
+      clearTimeout(saveTimer);
+      saveTimer = setTimeout(() => {
+        api().set_bgm(enabled, vol).catch(e => flash('❌ ' + e.message));
+      }, 300);
+      flash(enabled ? 'BGM ON' : 'BGM OFF');
+    }
+
+    // ===== 音量スライダー =====
+    function onVolumeInput() {
+      const vol = parseInt(document.getElementById('bgmVolume').value);
+      document.getElementById('bgmVolumeVal').textContent = vol + '%';
+      const enabled = document.getElementById('bgmEnabled').checked;
+      clearTimeout(saveTimer);
+      saveTimer = setTimeout(() => {
+        api().set_bgm(enabled, vol).catch(e => flash('❌ ' + e.message));
+      }, 300);
+    }
+
+    // ===== BGM試聴 =====
+    function testBgm(src, label) {
+      const audio = document.getElementById('testAudio');
+      if (!audio.paused) { audio.pause(); audio.currentTime = 0; }
+      audio.src = '/' + src;
+      audio.volume = parseInt(document.getElementById('bgmVolume').value) / 100;
+      audio.play().catch(() => {});
+      flash(label + ' 試聴中...');
+    }
+
+    // ===== BGM一覧を読み込んで試聴ボタンを作る =====
+    async function loadBgmButtons() {
+      let tracks = [], complete = 'BGM/BGM2.mp3';
+      try {
+        const res = await fetch('/api/bgm/list');
+        if (res.ok) {
+          const data = await res.json();
+          if (Array.isArray(data.tracks)) tracks = data.tracks;
+          if (data.complete) complete = data.complete;
+        }
+      } catch (e) { console.warn('BGM一覧の取得に失敗:', e); }
+      if (tracks.length === 0) tracks = ['BGM/BGM1.mp3'];
+
+      const row = document.getElementById('bgmTestRow');
+      row.innerHTML = '';
+      tracks.forEach(src => {
+        const name = src.split('/').pop().replace(/\.[^.]+$/, '');
+        const btn = document.createElement('button');
+        btn.className = 'btn btn-outline btn-sm';
+        btn.textContent = '▶ ' + name + ' 試聴';
+        btn.onclick = () => testBgm(src, name);
+        row.appendChild(btn);
+      });
+      const cbtn = document.createElement('button');
+      cbtn.className = 'btn btn-outline btn-sm';
+      cbtn.textContent = '▶ 完成音 試聴';
+      cbtn.onclick = () => testBgm(complete, '完成音');
+      row.appendChild(cbtn);
+
+      document.getElementById('bgmHint').textContent =
+        `考え中BGMは ${tracks.length}曲 からランダムで再生されます`
+        + '（BGMフォルダに BGM3.mp3 などを追加すると自動で増えます）';
+    }
+    loadBgmButtons();
+
+    // ===== 描画スピード =====
+    const SPEED_LABELS = ['即時', '速い', '普通', '遅い', '超遅'];
+    function updateSpeedLabel(v) {
+      document.getElementById('drawSpeedVal').textContent = SPEED_LABELS[v] ?? '普通';
+    }
+    function onSpeedInput() {
+      const v = parseInt(document.getElementById('drawSpeed').value);
+      updateSpeedLabel(v);
+      api().set_speed(v).catch(e => flash('❌ ' + e.message));
+      flash('スピード: ' + SPEED_LABELS[v]);
+    }
+
+    // ===== AI温度 =====
+    // BGM音量・描画スピードと同じく、動かした時点でサーバーに反映する。
+    // 以前は表示だけ変わって「AI設定を保存」を押すまで実際の値が変わらず、
+    // 画面に 0.85 と出ているのに中身は 1.5 のまま…という状態になり、
+    // 絵の品質が落ちた原因が分からなくなるため。
+    let tempTimer = null;
+    function onTempInput() {
+      const v = parseFloat(document.getElementById('aiTemp').value);
+      document.getElementById('aiTempVal').textContent = v.toFixed(2);
+      clearTimeout(tempTimer);
+      tempTimer = setTimeout(() => {
+        api().set_temperature(v).catch(e => flash('❌ ' + e.message));
+      }, 300);
+      flash('個性（温度）: ' + v.toFixed(2) + (v >= 1.2 ? ' ⚠ 高いと絵が崩れます' : ''));
+    }
+
+    // ===== AI設定保存 =====
+    async function saveAiSettings() {
+      const model = document.getElementById('modelSelect').value;
+      const temp  = parseFloat(document.getElementById('aiTemp').value);
+      if (!model) { flash('⚠ モデルが選択されていません'); return; }
+      const btn = document.getElementById('saveAiBtn');
+      if (btn) { btn.disabled = true; btn.textContent = '保存中...'; }
+      try {
+        await api().set_model(model);
+        await api().set_temperature(isNaN(temp) ? 0.85 : temp);
+        flash('✅ 保存: ' + model);
+        await loadSettings();
+      } catch (e) {
+        flash('❌ 保存失敗: ' + e.message);
+      } finally {
+        if (btn) { btn.disabled = false; btn.textContent = '💾 AI設定を保存'; }
+      }
+    }
+
+    // ===== ログ =====
+    async function loadLogs() {
+      const list = document.getElementById('log-list');
+      try {
+        const logs = await api().get_logs();
+        if (!logs || logs.length === 0) {
+          list.innerHTML = '<span style="color:#94a3b8;">ログなし</span>';
+          return;
+        }
+        list.innerHTML = [...logs].reverse().map(l =>
+          `<div class="log-entry"><span class="t">${l.time} </span><span class="tp ${l.type}">${l.type}</span> ${escHtml(l.data)}</div>`
+        ).join('');
+      } catch (e) {
+        list.innerHTML = '<span style="color:#94a3b8;">ログ取得待機中...</span>';
+      }
+    }
+
+    function escHtml(s) {
+      return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
+    }
+
+    // ===== デバッグ / シャットダウン =====
+    async function openDebug() {
+      try {
+        const r = await api().open_debug();
+        if (!r || r.status !== 'inline') flash('デバッグブラウザを開きました');
+      }
+      catch (e) { flash('❌ ' + e.message); }
+    }
+
+    async function shutdownApp() {
+      if (!confirm('AIソフトを終了しますか？')) return;
+      try { await api().shutdown(); } catch (_) {}
+    }
+
+    // ===== 起動時・定期更新 =====
+    // pywebview.api は loaded イベント後に使えるので少し待つ
+    function waitForApi(retries) {
+      if ((window.pywebview && window.pywebview.api) || ADMIN_TOKEN) {
+        loadSettings();
+        loadLogs();
+      } else if (retries > 0) {
+        setTimeout(() => waitForApi(retries - 1), 300);
+      } else {
+        document.getElementById('modelSelect').innerHTML =
+          '<option value="">pywebview API に接続できません</option>';
+      }
+    }
+    waitForApi(20); // 最大 6 秒待つ
+
+    // ステータス + ログを定期更新
+    setInterval(async () => {
+      try {
+        const s = await api().get_settings();
+        updateStatusBadge(s.draw_status || 'idle');
+      } catch (_) {}
+    }, 3000);
+    setInterval(loadLogs, 5000);
+  </script>
+</body>
+</html>

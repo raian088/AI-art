@@ -1,0 +1,25 @@
+# 秘密情報（APIキー）
+.env
+!.env.example
+
+# ビルド成果物
+build/
+dist/
+*.spec
+__pycache__/
+*.pyc
+*.exe
+
+# 実行時に作られるデータ（お客様の入力・絵・評価を含むので絶対に上げない）
+logs/
+debug.xlsx
+~$*.xlsx
+ratings.json
+
+# 旧 Node.js 版
+node_modules/
+
+# その他
+*.bak*
+.DS_Store
+Thumbs.db
