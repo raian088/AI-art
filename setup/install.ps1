@@ -72,8 +72,8 @@ $envPath = Join-Path $tgtFull '.env'
 if (-not (Test-Path $envPath)) {
     $example = Join-Path $tgtFull '.env.example'
     if (Test-Path $example) { Copy-Item $example $envPath } else { Set-Content -Path $envPath -Value 'GEMINI_API_KEY=' -Encoding UTF8 }
-    Warn '.env を作成しました。メモ帳が開くので GEMINI_API_KEY= のあとに APIキーを書いて保存してください。'
-    Start-Process notepad.exe $envPath -Wait
+    Warn 'APIキーが未設定です。初回起動時に表示される「APIキーを設定する」ボタン'
+    Warn '（または タイトル長押し → 暗証番号 0001 → 環境設定）から入力できます。'
 } else {
     Ok '.env（APIキー設定）はそのまま使います'
 }

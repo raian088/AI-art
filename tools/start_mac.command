@@ -8,9 +8,7 @@ if ! command -v python3 >/dev/null 2>&1; then
 fi
 if [ ! -f .env ]; then
   cp .env.example .env
-  echo "[注意] .env を作成しました。GEMINI_API_KEY= にAPIキーを書いて保存し、もう一度起動してください。"
-  open -e .env
-  read -r -p "Enterで閉じる"; exit 1
+  echo "[注意] APIキーが未設定です。起動後の「APIキーを設定する」ボタンから入力してください（暗証番号 0001）。"
 fi
 
 # 初回だけ仮想環境を作ってライブラリを入れる

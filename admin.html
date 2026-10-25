@@ -199,6 +199,22 @@
       white-space: nowrap;
     }
     #flash.show { opacity: 1; }
+
+    /* 環境設定（.env） */
+    .text-input {
+      width: 100%; padding: 8px 10px; border: 1px solid #cbd5e1; border-radius: 6px;
+      font: inherit; background: #fff;
+    }
+    .field { margin-bottom: 12px; }
+    .field-row { display: flex; gap: 6px; }
+    .field-row .text-input { flex: 1; }
+    .field-row .btn { width: auto; white-space: nowrap; }
+    .hint { font-size: 12px; color: #64748b; margin-top: 4px; word-break: break-all; }
+    .hint.ok { color: #16a34a; } .hint.ng { color: #dc2626; }
+    .badge { display: inline-block; font-size: 11px; font-weight: 700; padding: 1px 6px;
+             border-radius: 99px; margin-left: 6px; vertical-align: middle; }
+    .badge.ok { background: #dcfce7; color: #166534; } .badge.ng { background: #fee2e2; color: #991b1b; }
+    .card.highlight { outline: 3px solid #f59e0b; }
   </style>
 </head>
 <body>
@@ -260,6 +276,51 @@
     </div>
     <div style="margin-top:10px;">
       <button id="saveAiBtn" class="btn btn-primary" onclick="saveAiSettings()">💾 AI設定を保存</button>
+    </div>
+  </div>
+
+  <!-- 環境設定（.env） -->
+  <div class="card" id="env-card">
+    <div class="card-title">🔑 環境設定（APIキー・起動）</div>
+    <div id="env-locked" class="hint">読み込み中...</div>
+    <div id="env-form" style="display:none;">
+      <div class="field">
+        <label for="envApiKey">Gemini APIキー <span id="envKeyBadge" class="badge"></span></label>
+        <div class="field-row">
+          <input type="password" id="envApiKey" class="text-input" autocomplete="off" spellcheck="false"
+                 placeholder="変更するときだけ入力">
+          <button class="btn btn-outline btn-sm" type="button" onclick="toggleKeyVisible()">👁</button>
+          <button class="btn btn-outline btn-sm" type="button" onclick="testApiKey()">接続テスト</button>
+        </div>
+        <div id="envKeyHint" class="hint"></div>
+      </div>
+      <div class="field">
+        <label for="envPin">管理画面の暗証番号（数字4桁）</label>
+        <input type="text" id="envPin" class="text-input" inputmode="numeric" maxlength="4" autocomplete="off">
+      </div>
+      <div class="field">
+        <label for="envLaunchMode">起動方法</label>
+        <select id="envLaunchMode">
+          <option value="browser">ブラウザ（Chrome の全画面ロック）</option>
+          <option value="window">アプリウィンドウ（従来）</option>
+        </select>
+        <div id="envModeHint" class="hint"></div>
+      </div>
+      <div class="toggle-row">
+        <span class="toggle-label">キー制限（Alt+Tab・Alt+F4 などを無効化）</span>
+        <label class="toggle"><input type="checkbox" id="envBlockKeys"><span class="toggle-slider"></span></label>
+      </div>
+      <div class="toggle-row">
+        <span class="toggle-label">全画面で起動（アプリウィンドウのとき）</span>
+        <label class="toggle"><input type="checkbox" id="envFullscreen"><span class="toggle-slider"></span></label>
+      </div>
+      <div class="field">
+        <label for="envChromePath">Chrome の場所（ふつうは空欄でOK）</label>
+        <input type="text" id="envChromePath" class="text-input" spellcheck="false" placeholder="自動で探します">
+        <div id="envChromeHint" class="hint"></div>
+      </div>
+      <button id="envSaveBtn" class="btn btn-primary" type="button" onclick="saveEnv()">💾 環境設定を保存</button>
+      <div id="envPathHint" class="hint" style="margin-top:8px;"></div>
     </div>
   </div>
 
@@ -527,6 +588,95 @@
     async function shutdownApp() {
       if (!confirm('AIソフトを終了しますか？')) return;
       try { await api().shutdown(); } catch (_) {}
+    }
+
+
+    // ===== 環境設定（.env） =====
+    let envLoaded = null;
+    async function loadEnv() {
+      const locked = document.getElementById('env-locked');
+      if (!ADMIN_TOKEN) {
+        locked.textContent = 'タイトル長押し → 暗証番号 から開いたときに編集できます';
+        return;
+      }
+      try {
+        const e = await http('GET', '/api/admin/env');
+        envLoaded = e;
+        locked.style.display = 'none';
+        document.getElementById('env-form').style.display = '';
+        const badge = document.getElementById('envKeyBadge');
+        badge.textContent = e.api_key_set ? '設定済み' : '未設定';
+        badge.className = 'badge ' + (e.api_key_set ? 'ok' : 'ng');
+        document.getElementById('envApiKey').value = '';
+        document.getElementById('envApiKey').placeholder =
+          e.api_key_set ? `現在: ${e.api_key_masked}（変更するときだけ入力）` : 'AIza... で始まるキーを入力';
+        document.getElementById('envKeyHint').textContent = '';
+        document.getElementById('envPin').value = e.admin_pin;
+        document.getElementById('envLaunchMode').value = e.launch_mode;
+        document.getElementById('envModeHint').textContent =
+          `今回の起動: ${e.launch_mode_running === 'window' ? 'アプリウィンドウ' : 'ブラウザ'}（変更は次回起動から）`;
+        document.getElementById('envBlockKeys').checked = !!e.kiosk_block_keys;
+        document.getElementById('envFullscreen').checked = !!e.fullscreen;
+        document.getElementById('envChromePath').value = e.chrome_path || '';
+        const ch = document.getElementById('envChromeHint');
+        ch.textContent = e.chrome_found ? '検出: ' + e.chrome_found : '⚠ Chrome が見つかりません';
+        ch.className = 'hint ' + (e.chrome_found ? '' : 'ng');
+        document.getElementById('envPathHint').textContent = '保存先: ' + e.env_path;
+      } catch (err) {
+        locked.textContent = '⚠ ' + err.message;
+      }
+    }
+    function toggleKeyVisible() {
+      const el = document.getElementById('envApiKey');
+      el.type = el.type === 'password' ? 'text' : 'password';
+    }
+    async function testApiKey() {
+      const hint = document.getElementById('envKeyHint');
+      hint.className = 'hint'; hint.textContent = '確認中...';
+      try {
+        const r = await http('POST', '/api/admin/test-key', { api_key: document.getElementById('envApiKey').value.trim() });
+        hint.textContent = (r.ok ? '✅ ' : '❌ ') + r.message;
+        hint.className = 'hint ' + (r.ok ? 'ok' : 'ng');
+      } catch (err) { hint.textContent = '❌ ' + err.message; hint.className = 'hint ng'; }
+    }
+    async function saveEnv() {
+      const pin = document.getElementById('envPin').value.trim();
+      if (!/^[0-9]{4}$/.test(pin)) { flash('⚠ 暗証番号は数字4桁にしてください'); return; }
+      const body = {
+        api_key: document.getElementById('envApiKey').value.trim(),
+        admin_pin: pin,
+        launch_mode: document.getElementById('envLaunchMode').value,
+        kiosk_block_keys: document.getElementById('envBlockKeys').checked,
+        fullscreen: document.getElementById('envFullscreen').checked,
+        chrome_path: document.getElementById('envChromePath').value.trim(),
+      };
+      const btn = document.getElementById('envSaveBtn');
+      btn.disabled = true; btn.textContent = '保存中...';
+      try {
+        const res = await fetch('/api/admin/env', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json', 'X-Admin-Token': ADMIN_TOKEN },
+          body: JSON.stringify(body),
+        });
+        const r = await res.json().catch(() => ({}));
+        if (!res.ok) throw new Error(r.error || ('HTTP ' + res.status));
+        if (!r.changed || r.changed.length === 0) flash('変更はありません');
+        else flash('✅ 保存: ' + r.changed.join('・') + (r.restart_required.length ? '（次回起動から反映）' : ''));
+        if (r.changed && r.changed.includes('APIキー')) {
+          try { window.parent.postMessage({ type: 'aidrawing-api-key-saved' }, location.origin); } catch (_) {}
+        }
+        await loadEnv();
+      } catch (err) {
+        flash('❌ ' + err.message);
+      } finally {
+        btn.disabled = false; btn.textContent = '💾 環境設定を保存';
+      }
+    }
+    loadEnv();
+    if (PARAMS.get('section') === 'env') {
+      const card = document.getElementById('env-card');
+      card.classList.add('highlight');
+      setTimeout(() => card.scrollIntoView({ block: 'start' }), 100);
     }
 
     // ===== 起動時・定期更新 =====

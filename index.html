@@ -2526,8 +2526,8 @@ resizeCanvases();
         const res  = await fetch('/api/ready', { cache: 'no-store' });
         const data = await res.json();
         if (data.ready)        return true;
-        if (!data.network)     statusEl.textContent = 'ネットワークをまっています... 🌐';
-        else if (!data.api_key) statusEl.textContent = 'APIキーがみつかりません ⚠️';
+        if (!data.api_key)     return 'no_api_key';   // キー未設定はネットより先に知らせる
+        statusEl.textContent = 'ネットワークをまっています... 🌐';
       } catch(e) {
         statusEl.textContent = 'サーバーにせつぞくちゅう... 🔄';
       }
@@ -2563,6 +2563,23 @@ resizeCanvases();
     // --- ネット確認 ---
     statusEl.textContent = 'ネットワークをかくにんしています... 🌐';
     const netOk = await waitForNetwork();
+    if (netOk === 'no_api_key') {
+      // APIキー未設定：管理画面（暗証番号）からその場で入力してもらう
+      window.__apiKeyMissing = true;
+      iconEl.textContent   = '🔑';
+      statusEl.textContent = 'APIキーが設定されていません（スタッフの方へ）';
+      if (!document.getElementById('apikey-setup-btn')) {
+        const b = document.createElement('button');
+        b.id = 'apikey-setup-btn';
+        b.type = 'button';
+        b.textContent = '⚙ APIキーを設定する';
+        b.style.cssText = 'margin-top:18px;padding:12px 24px;font-size:18px;font-weight:700;'
+          + 'border:none;border-radius:999px;background:#1e3a5f;color:#fff;cursor:pointer;font-family:inherit;';
+        b.addEventListener('click', () => AdminGate.open({ section: 'env' }));
+        statusEl.insertAdjacentElement('afterend', b);
+      }
+      return;
+    }
     if (!netOk) {
       iconEl.textContent  = '⚠️';
       statusEl.textContent = 'ネットワークにつながっていないかも';
@@ -2655,10 +2672,11 @@ const AdminGate = (function () {
   const adminOverlay = document.getElementById('admin-overlay');
   const frame = document.getElementById('admin-frame');
   const IDLE_CLOSE_MS = 3 * 60 * 1000;   // 3分さわらなければ管理画面を自動で閉じる
-  let pin = '', busy = false, token = '', idleTimer = null;
+  let pin = '', busy = false, token = '', idleTimer = null, section = '';
 
   function render() { dots.forEach((d, i) => d.classList.toggle('on', i < pin.length)); }
-  function openPin() {
+  function openPin(opts) {
+    section = (opts && opts.section) || '';
     pin = ''; msg.textContent = ''; render();
     pinOverlay.classList.add('show');
     window.addEventListener('keydown', onKey, true);
@@ -2704,13 +2722,16 @@ const AdminGate = (function () {
   function openAdmin(mode) {
     // 従来のアプリウィンドウ（pywebview）なら、別ウィンドウの管理画面を開く
     if (mode === 'window' && window.pywebview && window.pywebview.api && window.pywebview.api.open_admin) {
-      try { window.pywebview.api.open_admin(); return; } catch (_) {}
+      try { window.pywebview.api.open_admin(token); return; } catch (_) {}
     }
     loadAdminTop();
     adminOverlay.classList.add('show');
     bumpIdle();
   }
-  function loadAdminTop() { frame.src = '/admin.html?embedded=1&token=' + encodeURIComponent(token); }
+  function loadAdminTop() {
+    frame.src = '/admin.html?embedded=1&token=' + encodeURIComponent(token)
+      + (section ? '&section=' + encodeURIComponent(section) : '');
+  }
   function closeAdmin() {
     adminOverlay.classList.remove('show');
     frame.src = 'about:blank';
@@ -2733,6 +2754,12 @@ const AdminGate = (function () {
   document.getElementById('pin-cancel').addEventListener('click', closePin);
   document.getElementById('admin-close').addEventListener('click', closeAdmin);
   document.getElementById('admin-home').addEventListener('click', () => { loadAdminTop(); bumpIdle(); });
+
+  // APIキー未設定で起動したとき：管理画面でキーを保存したら、閉じて最初からやり直す
+  window.addEventListener('message', (e) => {
+    if (e.origin !== location.origin || !e.data || e.data.type !== 'aidrawing-api-key-saved') return;
+    if (window.__apiKeyMissing) setTimeout(() => { closeAdmin(); location.reload(); }, 1200);
+  });
 
   return { open: openPin };
 })();

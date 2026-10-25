@@ -449,7 +449,22 @@ _recent_logs = []
 _recent_logs_lock = threading.Lock()
 MAX_RECENT_LOGS = 50
 
+_env_file_lock = threading.Lock()
+
+def _format_env_value(value) -> str:
+    """改行は取り除き、空白や # を含む値は ' ' で囲む（python-dotenv で正しく読めるように）。"""
+    v = str(value).replace("\r", "").replace("\n", "").strip()
+    if v and (" " in v or "#" in v or v[0] in "'\""):
+        v = "'" + v.replace("'", "") + "'"
+    return v
+
 def _save_env_value(key, value):
+    value = _format_env_value(value)
+    os.environ[key] = value.strip("'")
+    with _env_file_lock:
+        _write_env_line(key, value)
+
+def _write_env_line(key, value):
     path = os.path.join(exe_dir, ".env")
     lines = []
     if os.path.exists(path):
@@ -517,6 +532,116 @@ def api_admin_verify_pin():
         _pin_fail["count"] = 0
         _pin_fail["until"] = now + 30
     return jsonify({"ok": False}), 401
+
+# ==========================================
+# 管理画面から .env を編集する
+# ==========================================
+def _mask_key(k: str) -> str:
+    return (k[:4] + "…" + k[-4:]) if len(k) > 10 else ("設定済み" if k else "")
+
+@app.route('/api/admin/env', methods=['GET'])
+@require_admin
+def api_admin_env_get():
+    return jsonify({
+        "api_key_set": bool(API_KEY),
+        "api_key_masked": _mask_key(API_KEY),
+        "admin_pin": ADMIN_PIN,
+        "launch_mode": LAUNCH_MODE_SETTING,
+        "launch_mode_running": LAUNCH_MODE,
+        "kiosk_block_keys": KIOSK_BLOCK_KEYS,
+        "chrome_path": CHROME_PATH,
+        "chrome_found": kiosk.find_chrome(CHROME_PATH) or "",
+        "fullscreen": (os.environ.get("FULLSCREEN", "1") or "").strip().lower() not in ("0", "false", "no", "off"),
+        "env_path": os.path.join(exe_dir, ".env"),
+    })
+
+@app.route('/api/admin/env', methods=['POST'])
+@require_admin
+def api_admin_env_set():
+    global API_KEY, ADMIN_PIN, LAUNCH_MODE_SETTING, KIOSK_BLOCK_KEYS, CHROME_PATH, _keyblocker
+    data = request.json or {}
+    changed, restart = [], []
+
+    if "api_key" in data:
+        key = str(data["api_key"] or "").strip()
+        if key:                                   # 空欄のときは変更しない
+            if any(c.isspace() for c in key) or len(key) < 20:
+                return jsonify({"error": "APIキーの形式が正しくありません"}), 400
+            _save_env_value("GEMINI_API_KEY", key)
+            API_KEY = key
+            changed.append("APIキー")
+
+    if "admin_pin" in data:
+        pin = str(data["admin_pin"] or "").strip()
+        if pin != ADMIN_PIN:
+            if not (len(pin) == 4 and pin.isdigit()):
+                return jsonify({"error": "暗証番号は数字4桁にしてください"}), 400
+            _save_env_value("ADMIN_PIN", pin)
+            ADMIN_PIN = pin
+            changed.append("暗証番号")
+
+    if "launch_mode" in data:
+        mode = "window" if str(data["launch_mode"]).lower() == "window" else "browser"
+        if mode != LAUNCH_MODE_SETTING:
+            _save_env_value("LAUNCH_MODE", mode)
+            LAUNCH_MODE_SETTING = mode
+            changed.append("起動方法")
+            restart.append("起動方法")
+
+    if "kiosk_block_keys" in data:
+        on = bool(data["kiosk_block_keys"])
+        if on != KIOSK_BLOCK_KEYS:
+            _save_env_value("KIOSK_BLOCK_KEYS", "1" if on else "0")
+            KIOSK_BLOCK_KEYS = on
+            changed.append("キー制限")
+            # 今動いているロックにもすぐ反映
+            if _keyblocker is not None:
+                _keyblocker.enabled = on
+            elif on and _kiosk is not None:
+                _keyblocker = kiosk.KeyboardBlocker(lambda: _kiosk.pid if _kiosk else None)
+                _keyblocker.start()
+
+    if "chrome_path" in data:
+        path = str(data["chrome_path"] or "").strip().strip('"')
+        if path != CHROME_PATH:
+            if path and not os.path.isfile(path):
+                return jsonify({"error": "そのパスに Chrome が見つかりません"}), 400
+            _save_env_value("CHROME_PATH", path)
+            CHROME_PATH = path
+            if _kiosk is not None:
+                _kiosk.chrome_path = path
+            changed.append("Chromeの場所")
+            restart.append("Chromeの場所")
+
+    if "fullscreen" in data:
+        val = "1" if data["fullscreen"] else "0"
+        cur = (os.environ.get("FULLSCREEN", "1") or "").strip().lower() not in ("0", "false", "no", "off")
+        if bool(data["fullscreen"]) != cur:
+            _save_env_value("FULLSCREEN", val)
+            changed.append("全画面（ウィンドウモード）")
+            restart.append("全画面（ウィンドウモード）")
+
+    return jsonify({"status": "ok", "changed": changed, "restart_required": restart})
+
+@app.route('/api/admin/test-key', methods=['POST'])
+@require_admin
+def api_admin_test_key():
+    """APIキーで Gemini に接続できるか確認（入力中のキー、空なら保存済みのキー）。"""
+    key = str((request.json or {}).get("api_key") or "").strip() or API_KEY
+    if not key:
+        return jsonify({"ok": False, "message": "APIキーが入力されていません"})
+    try:
+        r = requests.get("https://generativelanguage.googleapis.com/v1beta/models",
+                         headers={"x-goog-api-key": key}, params={"pageSize": 1}, timeout=10)
+        if r.status_code == 200:
+            return jsonify({"ok": True, "message": "接続できました"})
+        try:
+            msg = r.json().get("error", {}).get("message", "")
+        except Exception:
+            msg = ""
+        return jsonify({"ok": False, "message": f"エラー {r.status_code}: {msg[:120]}"})
+    except Exception as e:
+        return jsonify({"ok": False, "message": f"接続できません（ネットワークを確認）: {type(e).__name__}"})
 
 # 開発時（python desktopaap.py）はプログラムのフォルダがそのまま公開されるので、
 # .env や .py などの内部ファイルは返さない
@@ -1744,7 +1869,8 @@ def _launch_mode() -> str:
 def _env_flag(name: str, default: str = "1") -> bool:
     return (os.environ.get(name, default) or "").strip().lower() not in ("0", "false", "no", "off")
 
-LAUNCH_MODE = _launch_mode()
+LAUNCH_MODE = _launch_mode()   # 今回の起動方法（引数 > .env）
+LAUNCH_MODE_SETTING = "window" if (os.environ.get("LAUNCH_MODE", "browser") or "").strip().lower() == "window" else "browser"
 CHROME_PATH = (os.environ.get("CHROME_PATH", "") or "").strip()
 KIOSK_BLOCK_KEYS = _env_flag("KIOSK_BLOCK_KEYS", "1")
 # Chrome 専用プロファイル（普段使いの Chrome とは別。デスクトップを散らかさないよう AppData に置く）
@@ -1953,13 +2079,13 @@ def open_native_window():
             except Exception:
                 pass
 
-        def open_admin(self):
+        def open_admin(self, token=""):
             try:
                 if admin_state["window"] is not None:
                     return
                 w = webview.create_window(
                     title="\u7ba1\u7406\u8005\u753b\u9762",
-                    url=ADMIN_URL,
+                    url=ADMIN_URL + ("?token=" + token if token else ""),
                     width=480,
                     height=700,
                     resizable=True,
@@ -2040,7 +2166,7 @@ def _main():
     if API_KEY:
         print(f"[APIキー] 設定OK (先頭4文字: {API_KEY[:4]}...)")
     else:
-        print("[APIキー] ★未設定★ .env に GEMINI_API_KEY=... を記述してください")
+        print("[APIキー] ★未設定★ 管理画面（タイトル長押し→暗証番号）の「環境設定」から入力してください")
     print(f"[index.html] path={os.path.join(base_dir, 'index.html')} exists={os.path.exists(os.path.join(base_dir, 'index.html'))}")
 
     # 1) Flask を別スレッドで起動
