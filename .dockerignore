@@ -1,0 +1,14 @@
+.git
+.env
+data/
+logs/
+dist/
+build/
+__pycache__/
+*.pyc
+.venv/
+debug.xlsx
+windows/
+offline/
+tools/
+docs/

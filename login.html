@@ -1,0 +1,47 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>AI お絵描き — ログイン</title>
+<style>
+  *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+  html, body { height: 100%; }
+  body {
+    display: flex; align-items: center; justify-content: center;
+    background: #fff5e6; font-family: system-ui, "Segoe UI", "Hiragino Sans", sans-serif; color: #1f2937;
+    padding: 16px;
+  }
+  .box {
+    width: 100%; max-width: 360px; background: #fff; border-radius: 18px;
+    padding: 28px 26px; box-shadow: 0 12px 40px rgba(0,0,0,.12);
+  }
+  h1 { font-size: 22px; text-align: center; margin-bottom: 4px; }
+  p.sub { text-align: center; font-size: 13px; color: #64748b; margin-bottom: 20px; }
+  label { display: block; font-size: 13px; font-weight: 700; margin: 12px 0 4px; }
+  input {
+    width: 100%; padding: 12px; font-size: 16px; border: 1px solid #cbd5e1; border-radius: 10px;
+  }
+  button {
+    width: 100%; margin-top: 20px; padding: 13px; font-size: 16px; font-weight: 700;
+    border: none; border-radius: 999px; background: #1e3a5f; color: #fff; cursor: pointer;
+  }
+  .err { margin-top: 14px; color: #dc2626; font-size: 13px; text-align: center; min-height: 18px; }
+  .note { margin-top: 16px; font-size: 12px; color: #94a3b8; text-align: center; }
+</style>
+</head>
+<body>
+  <form class="box" method="post" action="/login" autocomplete="on">
+    <h1>🎨 AI お絵描き</h1>
+    <p class="sub">スタッフ用ログイン</p>
+    <input type="hidden" name="next" value="{{NEXT}}">
+    <label for="u">ID</label>
+    <input id="u" name="username" autocomplete="username" required autofocus>
+    <label for="p">パスワード</label>
+    <input id="p" name="password" type="password" autocomplete="current-password" required>
+    <button type="submit">ログイン</button>
+    <div class="err">{{ERROR}}</div>
+    <div class="note">一度ログインすると、この PC では1年間ログインしたままになります</div>
+  </form>
+</body>
+</html>

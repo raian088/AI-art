@@ -1,0 +1,1 @@
+# ここに公開したURLを1行で書いておくと、setup.bat で入力しなくて済みます（例: https://ai-art.example.com）

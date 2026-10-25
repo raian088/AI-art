@@ -15,7 +15,8 @@ import requests
 import socket
 import ctypes
 from dotenv import load_dotenv
-from flask import Flask, request, jsonify, send_from_directory
+from flask import Flask, request, jsonify, send_from_directory, session, redirect
+from markupsafe import escape
 from flask_cors import CORS
 from PIL import Image, ImageDraw, ImageFont
 
@@ -61,7 +62,7 @@ def _xlsx_dir():
     env = (os.environ.get("DEBUG_XLSX_DIR", "") or "").strip().strip('"')
     if env and os.path.isdir(env):
         return env
-    return exe_dir
+    return DATA_DIR
 
 def _xlsx_path():
     return os.path.join(_xlsx_dir(), "debug.xlsx")
@@ -351,8 +352,22 @@ if getattr(sys, 'frozen', False):
         sys.stdout = open(os.devnull, "w")
         sys.stderr = open(os.devnull, "w")
 
-# .env ファイルの読み込み
-load_dotenv(os.path.join(exe_dir, ".env"))
+# ==========================================
+# 動作モード
+#   desktop : PC 上で exe / python を起動し、その PC の Chrome で開く（従来・オフライン向け）
+#   server  : サーバー（クラウド）で公開し、Windows PC は Chrome でドメインを開くだけ
+#             APP_MODE=server（Docker / gunicorn）か、起動引数 --server
+# ==========================================
+SERVER_MODE = ("--server" in [a.lower() for a in sys.argv[1:]]) or \
+    (os.environ.get("APP_MODE", "").strip().lower() == "server")
+
+# データ（.env・ログ・debug.xlsx・描いた絵）の保存先。サーバーでは永続ディスクを DATA_DIR に指定する
+DATA_DIR = (os.environ.get("DATA_DIR", "") or "").strip() or \
+    (os.path.join(base_dir, "data") if SERVER_MODE else exe_dir)
+os.makedirs(DATA_DIR, exist_ok=True)
+
+# .env ファイルの読み込み（サーバーでは管理画面で保存した値を、ホスティング側の環境変数より優先）
+load_dotenv(os.path.join(DATA_DIR, ".env"), override=SERVER_MODE)
 API_KEY = os.environ.get("GEMINI_API_KEY", "")
 
 def _gemini_headers():
@@ -465,7 +480,7 @@ def _save_env_value(key, value):
         _write_env_line(key, value)
 
 def _write_env_line(key, value):
-    path = os.path.join(exe_dir, ".env")
+    path = os.path.join(DATA_DIR, ".env")
     lines = []
     if os.path.exists(path):
         with open(path, "r", encoding="utf-8") as f:
@@ -488,6 +503,122 @@ def _write_env_line(key, value):
 app = Flask(__name__, static_folder=base_dir, static_url_path='')
 # 自分のアプリ（127.0.0.1 / localhost:5000）以外のサイトからは API を呼べないようにする
 CORS(app, origins=["http://127.0.0.1:5000", "http://localhost:5000"])
+
+# ==========================================
+# サーバー公開時のログイン（ID・パスワード）
+# ==========================================
+import secrets as _secrets
+import hmac as _hmac
+from datetime import timedelta
+
+def _load_secret_key() -> str:
+    """セッション用の鍵。環境変数 SECRET_KEY が無ければ DATA_DIR に作って保存（再起動してもログイン維持）。"""
+    k = (os.environ.get("SECRET_KEY", "") or "").strip()
+    if k:
+        return k
+    path = os.path.join(DATA_DIR, ".secret_key")
+    try:
+        if os.path.exists(path):
+            with open(path, "r", encoding="utf-8") as f:
+                k = f.read().strip()
+        if not k:
+            k = _secrets.token_hex(32)
+            with open(path, "w", encoding="utf-8") as f:
+                f.write(k)
+    except Exception:
+        k = k or _secrets.token_hex(32)
+    return k
+
+app.secret_key = _load_secret_key()
+app.config.update(
+    PERMANENT_SESSION_LIFETIME=timedelta(days=365),   # 展示 PC は1年間ログインしたまま
+    SESSION_COOKIE_HTTPONLY=True,
+    SESSION_COOKIE_SAMESITE="Lax",
+)
+
+if SERVER_MODE:
+    # Render / Cloud Run などのプロキシ越しでも https とアクセス元 IP を正しく扱う
+    from werkzeug.middleware.proxy_fix import ProxyFix
+    app.wsgi_app = ProxyFix(app.wsgi_app, x_for=1, x_proto=1, x_host=1)
+    app.config["SESSION_COOKIE_SECURE"] = (os.environ.get("COOKIE_SECURE", "1").strip() != "0")
+
+def _app_user() -> str:
+    return (os.environ.get("APP_USER", "") or "").strip()
+
+def _app_password() -> str:
+    return (os.environ.get("APP_PASSWORD", "") or "").strip()
+
+def _is_local_request() -> bool:
+    host = (request.host or "").split(":")[0]
+    return host in ("127.0.0.1", "localhost", "::1")
+
+_login_fail = {}          # ip -> [失敗回数, ロック解除時刻]
+_login_fail_lock = threading.Lock()
+_AUTH_OPEN_PATHS = ("/login", "/healthz", "/favicon.ico")
+
+@app.before_request
+def _require_login():
+    if not SERVER_MODE:
+        return None                     # PC 版（desktop）はログイン不要
+    if request.path in _AUTH_OPEN_PATHS:
+        return None
+    if not _app_password():
+        # パスワード未設定：Mac での開発（localhost）だけ通す。公開ドメインでは使わせない
+        if _is_local_request():
+            return None
+        return ("<h2>APP_PASSWORD が設定されていません</h2>"
+                "<p>サーバーの環境変数に APP_USER と APP_PASSWORD を設定してください。</p>"), 503
+    if session.get("auth"):
+        return None
+    if request.path.startswith("/api/"):
+        return jsonify({"error": "login required"}), 401
+    return redirect("/login?next=" + request.full_path.rstrip("?"))
+
+def _render_login(error="", nxt="/"):
+    with open(os.path.join(base_dir, "login.html"), "r", encoding="utf-8") as f:
+        html = f.read()
+    return html.replace("{{ERROR}}", str(escape(error))).replace("{{NEXT}}", str(escape(nxt)))
+
+@app.route('/login', methods=['GET', 'POST'])
+def login_page():
+    if not SERVER_MODE:
+        return redirect("/")
+    nxt = request.values.get("next", "/") or "/"
+    if not nxt.startswith("/") or nxt.startswith("//"):
+        nxt = "/"
+    if request.method == 'GET':
+        return _render_login("", nxt)
+    ip = request.remote_addr or "?"
+    now = time.time()
+    with _login_fail_lock:
+        cnt, until = _login_fail.get(ip, [0, 0.0])
+    if now < until:
+        return _render_login(f"しばらく待ってから試してください（{int(until - now) + 1}秒）", nxt), 429
+    user = (request.form.get("username") or "").strip()
+    pw = request.form.get("password") or ""
+    ok = bool(_app_password()) and _hmac.compare_digest(user, _app_user()) \
+        and _hmac.compare_digest(pw, _app_password())
+    if ok:
+        with _login_fail_lock:
+            _login_fail.pop(ip, None)
+        session.clear()
+        session.permanent = True
+        session["auth"] = True
+        return redirect(nxt)
+    cnt += 1
+    with _login_fail_lock:
+        _login_fail[ip] = [0, now + 300] if cnt >= 10 else [cnt, 0.0]   # 10回失敗で5分ロック
+    time.sleep(0.5)
+    return _render_login("ID またはパスワードがちがいます", nxt), 401
+
+@app.route('/logout')
+def logout_page():
+    session.clear()
+    return redirect("/login")
+
+@app.route('/healthz')
+def healthz():
+    return "ok"
 
 # ==========================================
 # 管理者 PIN（タイトル長押し → 暗証番号）
@@ -526,7 +657,7 @@ def api_admin_verify_pin():
         tok = secrets.token_urlsafe(24)
         with _admin_tokens_lock:
             _admin_tokens.add(tok)
-        return jsonify({"ok": True, "token": tok, "mode": LAUNCH_MODE})
+        return jsonify({"ok": True, "token": tok, "mode": "server" if SERVER_MODE else LAUNCH_MODE})
     _pin_fail["count"] += 1
     if _pin_fail["count"] >= 5:          # 5回間違えたら30秒ロック
         _pin_fail["count"] = 0
@@ -552,7 +683,10 @@ def api_admin_env_get():
         "chrome_path": CHROME_PATH,
         "chrome_found": kiosk.find_chrome(CHROME_PATH) or "",
         "fullscreen": (os.environ.get("FULLSCREEN", "1") or "").strip().lower() not in ("0", "false", "no", "off"),
-        "env_path": os.path.join(exe_dir, ".env"),
+        "env_path": os.path.join(DATA_DIR, ".env"),
+        "server_mode": SERVER_MODE,
+        "app_user": _app_user(),
+        "app_password_set": bool(_app_password()),
     })
 
 @app.route('/api/admin/env', methods=['POST'])
@@ -621,6 +755,20 @@ def api_admin_env_set():
             changed.append("全画面（ウィンドウモード）")
             restart.append("全画面（ウィンドウモード）")
 
+    if SERVER_MODE and "app_user" in data:
+        u = str(data["app_user"] or "").strip()
+        if u and u != _app_user():
+            if len(u) < 3 or any(c.isspace() for c in u):
+                return jsonify({"error": "ログインIDは空白なしの3文字以上にしてください"}), 400
+            _save_env_value("APP_USER", u)
+            changed.append("ログインID")
+    if SERVER_MODE and data.get("app_password"):
+        pw = str(data["app_password"])
+        if len(pw) < 8 or any(c.isspace() for c in pw):
+            return jsonify({"error": "パスワードは空白なしの8文字以上にしてください"}), 400
+        _save_env_value("APP_PASSWORD", pw)
+        changed.append("ログインパスワード")
+
     return jsonify({"status": "ok", "changed": changed, "restart_required": restart})
 
 @app.route('/api/admin/test-key', methods=['POST'])
@@ -652,7 +800,7 @@ def _deny_internal_files():
     path = request.path or ""
     parts = [x for x in path.split("/") if x]
     if any(x.startswith(".") for x in parts) or path.lower().endswith(_DENY_EXT) \
-            or (parts and parts[0] in ("logs", "dist", "build", "__pycache__") and path != "/logs/images" and not path.startswith("/logs/images/")):
+            or (parts and parts[0] in ("logs", "dist", "build", "__pycache__", "data", "tools", "windows", "offline") and path != "/logs/images" and not path.startswith("/logs/images/")):
         return "Not Found", 404
 
 # ==========================================
@@ -670,6 +818,8 @@ def serve_index():
 def api_admin_settings():
     with _settings_lock:
         return jsonify({
+            "server_mode": SERVER_MODE,
+            "print_mode": "browser" if SERVER_MODE else "local",
             "model": GEMINI_MODEL,
             "models": GEMINI_MODELS,
             **app_settings,
@@ -977,7 +1127,7 @@ def debug_image(fname):
 @app.route('/api/admin/open-debug', methods=['POST'])
 @require_admin
 def api_admin_open_debug():
-    if LAUNCH_MODE == "browser":
+    if SERVER_MODE or LAUNCH_MODE == "browser":
         # キオスク中は別ウィンドウが裏に隠れるので、管理画面の中で開く
         return jsonify({"status": "inline", "url": "/debug"})
     subprocess.Popen(["cmd", "/c", "start", "", "http://127.0.0.1:5000/debug"], shell=False)
@@ -986,6 +1136,8 @@ def api_admin_open_debug():
 @app.route('/api/admin/shutdown', methods=['POST'])
 @require_admin
 def api_admin_shutdown():
+    if SERVER_MODE:
+        return jsonify({"error": "サーバー版ではアプリを終了できません。画面は Alt+F4 で閉じてください"}), 400
     def quit_later():
         time.sleep(0.25)
         _shutdown_everything()
@@ -995,6 +1147,8 @@ def api_admin_shutdown():
 @app.route('/api/admin/open-window', methods=['POST'])
 @require_admin
 def api_admin_open_window():
+    if SERVER_MODE:
+        return jsonify({"error": "server mode"}), 400
     browser = kiosk.find_chrome(CHROME_PATH) or kiosk.find_edge()
     if browser:
         subprocess.Popen([browser, "--app=http://127.0.0.1:5000/admin.html", "--window-size=480,700"])
@@ -1003,7 +1157,7 @@ def api_admin_open_window():
 # ==========================================
 # ログ保存機能
 # ==========================================
-LOG_DIR = os.path.join(exe_dir, "logs")
+LOG_DIR = os.path.join(DATA_DIR, "logs")
 if not os.path.exists(LOG_DIR):
     os.makedirs(LOG_DIR)
 
@@ -1729,6 +1883,8 @@ def build_print_image(drawing_image, prompt_text):
 
 @app.route('/print', methods=['POST'])
 def print_image():
+    if SERVER_MODE:
+        return jsonify({"status": "error", "error": "サーバー版はブラウザ（Chrome）で印刷します"}), 400
     """印刷ジョブを送る。
 
     主な改善:
@@ -2131,10 +2287,31 @@ def _fatal_box(title: str, msg: str):
     except Exception:
         pass
 
+# gunicorn など WSGI サーバーから読み込まれたとき（本番）も、過去ログを読み込んでおく
+if SERVER_MODE and __name__ != "__main__":
+    try:
+        _load_xlsx_history_into_buffer()
+    except Exception as _e:
+        print(f"[XLSX] 履歴の読み込みをスキップ: {_e}")
+
+def run_server_mode():
+    """サーバー公開モード（Mac での開発確認用。本番は gunicorn で起動）。"""
+    _load_xlsx_history_into_buffer()
+    host = os.environ.get("HOST", "127.0.0.1")
+    port = int(os.environ.get("PORT", "8080"))
+    print(f"🎨 AIお絵描き サーバーモード: http://{'localhost' if host in ('127.0.0.1', '0.0.0.0') else host}:{port}/")
+    print(f"[data] {DATA_DIR}")
+    print(f"[APIキー] {'設定OK' if API_KEY else '★未設定★（管理画面の環境設定から入力できます）'}")
+    print(f"[ログイン] {'ID/パスワード設定済み' if _app_password() else 'APP_PASSWORD 未設定（localhost からのみ利用可）'}")
+    app.run(host=host, port=port, debug=False, use_reloader=False, threaded=True)
+
 def _main():
     args = [a.lower() for a in sys.argv[1:]]
     if any(a in ('--debug-only', '--debug-server') for a in args):
         start_server()
+        return
+    if SERVER_MODE:
+        run_server_mode()
         return
 
     # ★最優先：多重起動チェック。既に起動中ならここで終了する
@@ -2161,7 +2338,7 @@ def _main():
 
     print("🎨 AIお絵描き 起動中...")
     # 起動時チェック（原因切り分け用）
-    env_path = os.path.join(exe_dir, ".env")
+    env_path = os.path.join(DATA_DIR, ".env")
     print(f"[.env] path={env_path} exists={os.path.exists(env_path)}")
     if API_KEY:
         print(f"[APIキー] 設定OK (先頭4文字: {API_KEY[:4]}...)")

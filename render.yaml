@@ -1,0 +1,28 @@
+# Render（https://render.com）用の設定。GitHub のリポジトリをつなぐと、push するたびに自動で公開されます。
+services:
+  - type: web
+    name: ai-art
+    runtime: docker
+    plan: starter          # 無料プランはディスク不可＆スリープするので展示には不向き
+    region: singapore
+    healthCheckPath: /healthz
+    autoDeploy: true
+    disk:
+      name: ai-art-data
+      mountPath: /data     # .env（管理画面で変えた設定）・ログ・描いた絵を保存
+      sizeGB: 1
+    envVars:
+      - key: APP_MODE
+        value: server
+      - key: DATA_DIR
+        value: /data
+      - key: SECRET_KEY
+        generateValue: true
+      - key: APP_USER
+        sync: false        # Render の画面で入力
+      - key: APP_PASSWORD
+        sync: false
+      - key: GEMINI_API_KEY
+        sync: false        # 空のままでも、公開後に管理画面から入力できます
+      - key: ADMIN_PIN
+        value: "0001"

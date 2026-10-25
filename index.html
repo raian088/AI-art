@@ -899,6 +899,23 @@
     border: none; cursor: pointer; background: #fff; color: #1e3a5f;
   }
   #admin-frame { flex: 1; border: 0; width: 100%; background: #f0f4f8; }
+
+  /* ===== 印刷（A5縦：上 148mm 正方形に絵、下にお題） ===== */
+  #print-area { display: none; }
+  @media print {
+    @page { size: A5 portrait; margin: 0; }
+    html, body { background: #fff !important; }
+    body > *:not(#print-area) { display: none !important; }
+    #print-area { display: block; width: 148mm; height: 209mm; overflow: hidden; background: #fff; }
+    #print-area .pa-img { width: 148mm; height: 148mm; display: flex; align-items: center; justify-content: center; }
+    #print-area img { max-width: 146mm; max-height: 146mm; }
+    #print-area .pa-line { border-top: 0.5mm solid #b4b4b4; }
+    #print-area .pa-title {
+      height: 60mm; display: flex; align-items: center; justify-content: center; text-align: center;
+      padding: 0 10mm; font-size: 8mm; font-weight: 700; color: #282828; line-height: 1.4;
+      font-family: 'Zen Maru Gothic', sans-serif; word-break: break-all;
+    }
+  }
 </style>
 </head>
 <body>
@@ -1076,7 +1093,7 @@ completeAudio.preload = 'auto';
 // BGMフォルダの一覧をサーバーから取得（BGM3.mp3 などを置くだけで自動的に増える）
 async function loadBgmList() {
   try {
-    const res = await fetch('http://127.0.0.1:5000/api/bgm/list');
+    const res = await fetch('/api/bgm/list');
     if (!res.ok) return;
     const data = await res.json();
     if (Array.isArray(data.tracks) && data.tracks.length > 0) {
@@ -1108,12 +1125,13 @@ function applyBgmSettings() {
 
 async function syncSettings() {
   try {
-    const res = await fetch('http://127.0.0.1:5000/api/admin/settings');
+    const res = await fetch('/api/admin/settings');
     if (!res.ok) return;
     const data = await res.json();
     appSettings.bgm_enabled = data.bgm_enabled ?? true;
     appSettings.bgm_volume  = data.bgm_volume  ?? 80;
     appSettings.draw_speed  = data.draw_speed  ?? 2;
+    if (data.print_mode) appSettings.print_mode = data.print_mode;
     applyBgmSettings();
   } catch (_) {}
 }
@@ -1123,7 +1141,7 @@ syncSettings();
 setInterval(syncSettings, 3000);
 
 function reportStatus(status) {
-  fetch('http://127.0.0.1:5000/api/admin/status?draw_status=' + encodeURIComponent(status))
+  fetch('/api/admin/status?draw_status=' + encodeURIComponent(status))
     .catch(() => {});
 }
 
@@ -1193,7 +1211,7 @@ function insertDash() {
 // ===== ログ送信機能 =====
 async function sendLog(type, data) {
   try {
-    await fetch('http://localhost:5000/api/log', {
+    await fetch('/api/log', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ type: type, data: data })
@@ -1708,6 +1726,24 @@ function hidePostPrintOverlay() {
 }
 
 // ===== 印刷 (Flask経由でサイレント印刷) & 5秒後のUI切り替え =====
+// ===== ブラウザ（Chrome）で印刷 =====
+// サーバー版：Chrome を --kiosk-printing で起動しておくと、確認ダイアログなしで既定のプリンターに印刷される
+function printInBrowser(dataUrl, prompt) {
+  return new Promise((resolve, reject) => {
+    const area = document.getElementById('print-area');
+    const img = area.querySelector('img');
+    area.querySelector('.pa-title').textContent = prompt ? `「${prompt}」` : 'AI お絵描き作品';
+    img.onload = async () => {
+      try { if (document.fonts && document.fonts.ready) await document.fonts.ready; } catch (_) {}
+      setTimeout(() => {
+        try { window.print(); resolve(); } catch (e) { reject(e); }
+      }, 50);
+    };
+    img.onerror = () => reject(new Error('印刷用の画像を作れませんでした'));
+    img.src = dataUrl;
+  });
+}
+
 async function printImage() {
   const dataUrl = mainCanvas.toDataURL('image/png');
   const printBtn = document.getElementById('print-big-btn');
@@ -1717,13 +1753,19 @@ async function printImage() {
   sendLog('PRINT_START', `印刷リクエスト: ${lastPrompt}`);
 
   try {
-    const res = await fetch('http://localhost:5000/print', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ image: dataUrl, prompt: lastPrompt })
-    });
-    const data = await res.json();
-    
+    let data;
+    if ((appSettings.print_mode || (location.port === '5000' ? 'local' : 'browser')) === 'browser') {
+      await printInBrowser(dataUrl, lastPrompt);
+      data = { status: 'ok' };
+    } else {
+      const res = await fetch('/print', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ image: dataUrl, prompt: lastPrompt })
+      });
+      data = await res.json();
+    }
+
     if (data.status === 'ok') {
       // 成功したらカウントダウンを開始
       let countdown = 5;
@@ -1947,7 +1989,7 @@ async function fetchCommands(prompt) {
   const W = DRAW_CANVAS_SIZE, H = DRAW_CANVAS_SIZE;
 
   drawAbortController = new AbortController();
-  const res = await fetch('http://127.0.0.1:5000/api/draw', {
+  const res = await fetch('/api/draw', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ prompt, width: W, height: H }),
@@ -2604,6 +2646,13 @@ resizeCanvases();
   run();
 })();
 </script>
+
+<!-- ===== 印刷用レイアウト（A5縦：上に絵、下にお題）===== -->
+<div id="print-area" aria-hidden="true">
+  <div class="pa-img"><img alt=""></div>
+  <div class="pa-line"></div>
+  <div class="pa-title"></div>
+</div>
 
 <!-- ===== 管理者 PIN 入力 ===== -->
 <div id="pin-overlay" aria-hidden="true">

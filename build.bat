@@ -92,6 +92,7 @@ echo [3/3] Building dist\AIDrawing\AIDrawing.exe ...
   --name "AIDrawing" ^
   --add-data "index.html;." ^
   --add-data "admin.html;." ^
+  --add-data "login.html;." ^
   --add-data "BGM;BGM" ^
   --add-data "assets;assets" ^
   --hidden-import win32print ^
@@ -148,7 +149,7 @@ if exist ".env" (
   copy /y ".env" "dist\AIDrawing\.env" >nul
 )
 if exist ".env.example" copy /y ".env.example" "dist\AIDrawing\.env.example" >nul
-if exist "setup" xcopy /E /I /Y /Q "setup" "dist\AIDrawing\setup" >nul
+if exist "offline" xcopy /E /I /Y /Q "offline" "dist\AIDrawing\setup" >nul
 
 echo.
 echo [OK] Build complete: dist\AIDrawing\AIDrawing.exe

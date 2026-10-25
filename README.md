@@ -1,124 +1,143 @@
 # 🎨 AI お絵描き（AI-art）
 
 子どもが言った・入力したお題を、AI（Google Gemini）が一筆ずつアニメーションで描くアプリです。
-Windows PC で Google Chrome を**全画面ロック（キオスク）**で開いて動かします。
+
+**運用の流れ**
+
+```
+ 開発（Mac）          公開（サーバー）               展示（Windows PC）
+ 修正・動作確認  ──▶  GitHub に push で自動反映  ──▶  Chrome 全画面で URL を開くだけ
+ tools/dev_mac        Render など + 独自ドメイン        windows/setup.bat
+```
+
+- APIキーはサーバーにだけ置くので、展示 PC にキーは入りません
+- 修正を push すれば、すべての展示 PC が次に開いたときから新しい版になります（PC 側の作業不要）
+- 展示 PC の設定・APIキー・暗証番号は、展示 PC の画面（管理画面）から変更できます
 
 ## フォルダ構成
 
 ```
 AI-art/
-├── desktopaap.py        # 本体（Flask サーバー + 起動処理）
-├── kiosk.py             # Chrome キオスク起動・キー制限
+├── desktopaap.py        # 本体（Flask サーバー）
 ├── index.html           # お絵描き画面
 ├── admin.html           # 管理者画面
-├── assets/              # ロゴ画像
-├── BGM/                 # BGM（BGM2.mp3 = 完成音、それ以外は考え中にランダム再生）
-├── build.bat            # exe 化（dist\AIDrawing\ に出力）
-├── setup/               # Windows へのインストール・自動起動の登録
-│   ├── install.bat
-│   └── uninstall.bat
-├── tools/
-│   ├── open_debug_log.bat   # デバッグログ画面を開く（Windows）
-│   └── start_mac.command    # Mac 用の起動スクリプト
-├── docs/
-│   └── LICENSE_AUDIT.md     # ライブラリの商用利用可否の調査
-└── .env.example         # 設定ファイルの見本（コピーして .env にする）
+├── login.html           # ログイン画面（サーバー版）
+├── kiosk.py             # PC 版（exe）用：Chrome 全画面起動・キー制限
+├── assets/  BGM/        # ロゴ画像・BGM（BGM2.mp3 = 完成音）
+├── Dockerfile  requirements.txt  render.yaml   # サーバー公開用
+├── tools/dev_mac.command    # Mac で開発・動作確認
+├── windows/                 # 展示用 Windows PC の設定（サーバー版）
+├── offline/  build.bat      # PC 版（exe・オフライン）
+├── docs/LICENSE_AUDIT.md    # ライブラリの商用利用可否の調査
+└── .env.example             # 設定項目の見本
 ```
 
-## Windows PC へのセットアップ
+---
 
-前提: Windows 10/11、Google Chrome、Python 3.12（ビルドする PC のみ）
+## 1. Mac で開発する
 
-1. **APIキー**: あとでアプリの画面から入力できるので、ここでは何もしなくてOK（先に書く場合は `.env.example` をコピーして `.env` にし、`GEMINI_API_KEY=` に記入）
-2. **ビルド**: `build.bat` をダブルクリック → `dist\AIDrawing\AIDrawing.exe` ができる
-3. **インストール**: `dist\AIDrawing\setup\install.bat` をダブルクリック
-   - アプリ一式をデスクトップの `AIDrawing` フォルダに配置
+前提: Python 3（https://www.python.org/ ）
+
+1. `tools/dev_mac.command` をダブルクリック（「開発元を確認できません」と出たら右クリック →「開く」）
+2. ブラウザで http://localhost:8080/ が開きます
+3. APIキーは、起動画面の「⚙ APIキーを設定する」→ 暗証番号 0001 → 入力（`data/.env` に保存）
+4. ファイルを修正したら、ターミナルで Ctrl+C → もう一度ダブルクリック
+
+Mac の開発環境ではログインなしで使えます（`localhost` のときだけ）。印刷ボタンを押すと Mac の印刷ダイアログが出ます。
+
+## 2. サーバーに公開する（ドメイン）
+
+おすすめは **Render**（GitHub につなぐだけで、push のたびに自動で公開。https も自動）。
+
+1. https://render.com にログイン → **New > Blueprint** → この GitHub リポジトリ（raian088/AI-art）を選ぶ
+   - `render.yaml` の設定（Docker・データ保存用ディスク 1GB・Starter プラン）が読み込まれます
+2. 環境変数を入力
+   - `APP_USER` / `APP_PASSWORD` … 展示 PC の Chrome でログインする ID・パスワード（**必須**）
+   - `GEMINI_API_KEY` … 空でもOK（公開後に管理画面から入力できます）
+3. デプロイが終わると `https://ai-art-xxxx.onrender.com` で開けます
+4. 独自ドメイン：Render の **Settings > Custom Domains** でドメインを追加 → 表示された CNAME をドメイン管理画面（お名前.com など）に設定
+
+> 費用の目安：Render Starter 約 $7/月 + ディスク 1GB 約 $0.25/月。無料プランはディスクが使えず、15分使わないとスリープして起動に時間がかかるので展示には向きません。
+
+**他のサービスに置く場合**：`Dockerfile` があるので、Docker が動く所ならどこでも動きます。
+
+- 環境変数 `APP_MODE=server`、`DATA_DIR=/data`、`APP_USER`、`APP_PASSWORD` を設定し、`/data` に永続ディスクをつなぐ
+- Google Cloud Run など永続ディスクが無いサービスでは、管理画面で変えた設定（APIキー・暗証番号など）が再起動で消えます。その場合は環境変数で設定してください
+
+**更新のしかた**：Mac で修正 → `git push` → Render が自動で公開（数分）。展示 PC は「最初から」ボタンか再起動で新しい版になります。
+
+## 3. 展示用 Windows PC を設定する
+
+前提: Windows 10/11、Google Chrome、プリンター（印刷する場合）
+
+1. `windows` フォルダを PC にコピー（USB メモリなど）
+   - `windows/kiosk_url.txt` に公開した URL を書いておくと、入力の手間が省けます
+2. `windows/setup.bat` をダブルクリック
+   - URL を入力（kiosk_url.txt に書いてあれば不要）
    - デスクトップにショートカット「AIお絵描き」を作成
    - 「PC起動時に自動で全画面起動しますか？」→ Y でスタートアップに登録
-   - （任意）スリープ・画面オフの無効化
+3. 「今すぐ起動しますか？」→ Y → 全画面でログイン画面が出るので ID・パスワードを入力（初回だけ。1年間ログインしたまま）
 
-別の PC に入れるときは、`dist\AIDrawing` フォルダごとコピーして `setup\install.bat` を実行するだけです（Python は不要）。
-
-### 自動起動の ON / OFF
-
-Windows の **設定 > アプリ > スタートアップ** に「AIお絵描き」が表示され、そこで切り替えできます。
-完全に解除するときは `setup\uninstall.bat` を実行します。
-
-> サインイン画面で止まると自動起動されません。展示用 PC は自動サインインの設定もおすすめです。
-
-## 画面ロック（キオスク）
-
-起動すると Chrome が全画面で開き、アドレスバーやタブは表示されません。
-
-| 操作 | ロック中 |
+| やりたいこと | 方法 |
 |---|---|
-| アプリのボタン・お題の入力・マイク | ✅ 使える |
-| 右クリック・文字選択・ドラッグ・拡大（ピンチ / Ctrl+ホイール） | ❌ 無効 |
-| 更新（F5）・戻る・印刷・検索・開発者ツールなどのブラウザ操作 | ❌ 無効 |
-| Alt+Tab / Alt+F4 / Alt+Esc / Ctrl+W / Ctrl+N / Ctrl+Shift+Esc | ❌ 無効 |
-| Windows キー | ✅ 使える（指定どおり残しています） |
-| Ctrl+Alt+Del | ✅ 使える（Windows の仕様上ブロック不可） |
+| 起動 | デスクトップの「AIお絵描き」 |
+| 閉じる | **Alt+F4** |
+| 管理画面（BGM・AIモデル・APIキー・暗証番号など） | タイトルを **2秒長押し** → 暗証番号（初期値 **0001**） |
+| 自動起動の ON/OFF | Windows の 設定 > アプリ > スタートアップ |
+| 設定を元に戻す | `windows/uninstall.bat` |
 
-- Chrome が落ちたり閉じられたりしても、自動で開き直します
-- Chrome は普段使いとは別の専用プロファイル（`%LOCALAPPDATA%\AIDrawing\chrome-profile`）で起動します
+- PC 起動時はサーバーにつながるまで待ってから Chrome を開きます（最大90秒）
+- Chrome は普段使いとは別の専用プロファイルで開きます
 
-### 管理画面・終了のしかた
+### 印刷
 
-1. 画面上部のタイトル「🎨 AI お絵描き ✨」を **2秒長押し**
-2. 暗証番号を入力（初期値 **0001**）
-3. 管理画面が開く → BGM・スピード・AIモデル・**環境設定（APIキー・暗証番号など）**・ログ確認・デバッグ・**「AIソフトを閉じる」**
+「印刷する」ボタンで、**確認ダイアログなしで Windows の既定のプリンター**に印刷します（A5 縦：上に絵、下にお題）。
 
-管理画面は 3 分間さわらないと自動で閉じます。暗証番号を 5 回間違えると 30 秒ロックされます。
+- 設定 > Bluetooth とデバイス > プリンターとスキャナー で、使うプリンターを「既定」に
+- 同じ画面の「Windows で通常使うプリンターを管理する」は **オフ**（勝手に既定が変わるのを防ぐ）
+- プリンターの用紙サイズを **A5** に
 
-## 設定（.env）
+### 画面ロック
 
-管理画面の **「🔑 環境設定」** から画面上で入力・保存できます（`.env` に書き込まれます）。
+全画面でアドレスバー・タブは表示されません。ページ内では右クリック・文字選択・拡大・更新（F5）・戻る などを無効にしています。
+Alt+F4（閉じる）と Windows キーは使えます。
 
-- APIキーが未設定のまま起動すると、起動画面に **「⚙ APIキーを設定する」** ボタンが出ます → 暗証番号 → キーを入力して保存すると自動で再開します
-- 「接続テスト」で、入力したキーで Gemini に接続できるか確認できます
-- APIキー・暗証番号・キー制限はすぐ反映、起動方法・Chrome の場所・全画面は次回起動から反映
+---
 
-`.env` を直接メモ帳などで編集しても同じです。
+## 管理画面
+
+タイトル「🎨 AI お絵描き ✨」を 2秒長押し → 暗証番号。3分さわらないと自動で閉じ、暗証番号を5回間違えると30秒ロックされます。
+
+- BGM・描画スピード・AIモデル・個性（温度）
+- **🔑 環境設定**：Gemini APIキー（接続テスト付き）・暗証番号・ログインID/パスワード
+- 最近のログ・デバッグ画面
+
+サーバー版の設定は全 PC 共通です（1台で変えると全部に反映）。
+
+## 設定項目（.env / 環境変数）
 
 | 項目 | 初期値 | 内容 |
 |---|---|---|
-| `GEMINI_API_KEY` | — | Gemini API キー（必須） |
-| `GEMINI_MODEL` | — | 使うモデル（管理画面からも変更可） |
-| `LAUNCH_MODE` | `browser` | `browser` = Chrome キオスク / `window` = 従来のアプリウィンドウ |
+| `GEMINI_API_KEY` | — | Gemini API キー |
+| `GEMINI_MODEL` | — | 使うモデル |
 | `ADMIN_PIN` | `0001` | 管理画面の暗証番号 |
-| `KIOSK_BLOCK_KEYS` | `1` | `0` にすると Alt+Tab などのキー制限をしない |
-| `CHROME_PATH` | 自動検出 | Chrome が標準の場所にないときだけ指定 |
+| `APP_USER` / `APP_PASSWORD` | — | サーバー版のログイン（公開時は必須） |
+| `APP_MODE` | — | `server` でサーバー版 |
+| `DATA_DIR` | — | 設定・ログ・描いた絵の保存先（サーバーでは永続ディスク） |
+| `SECRET_KEY` | 自動生成 | ログイン状態の暗号化キー |
 
-起動引数 `--browser` / `--window` で一時的に切り替えもできます。`--delay=10` で起動を10秒遅らせます（自動起動で使用）。
+## PC 版（exe・オフライン）
 
-## Mac での起動
+サーバーを使わず、PC 1台で完結させる従来の方法も残しています（Windows・ネット接続は Gemini のみ必要）。
 
-Mac でも動かせます（展示用の本番は Windows を想定しています）。
-
-1. Google Chrome と Python 3（https://www.python.org/ ）をインストール
-2. **AirPlay レシーバーを OFF**：システム設定 > 一般 > AirDrop と Handoff > AirPlay レシーバー
-   （Mac はこの機能が 5000 番ポートを使うため、ONのままだと起動できません）
-3. `tools/start_mac.command` をダブルクリック
-   - 初回は「⚙ APIキーを設定する」ボタンが出るので、暗証番号 0001 → キーを入力して保存
-   - 初回はライブラリのインストールに少し時間がかかります
-   - 「開発元を確認できません」と出たら、右クリック >「開く」で起動
-
-Mac での違い：
-
-- **印刷はできません**（Windows のプリンター機能を使っているため）
-- Cmd+Tab・Cmd+Q などのキー制限はありません（Cmd+Q で閉じても Chrome は自動で開き直します）
-- 終了は管理画面の「AIソフトを閉じる」、またはターミナルで Ctrl+C
-
-## 開発時の起動
-
-```bat
-pip install flask flask-cors requests python-dotenv pillow pywin32 openpyxl pywebview
-python desktopaap.py
-```
-
-ブラウザで http://127.0.0.1:5000/ を開いても使えます。
+1. `.env.example` をコピーして `.env` に（APIキーは後から管理画面でも入力可）
+2. `build.bat` → `dist\AIDrawing\AIDrawing.exe`
+3. `dist\AIDrawing\setup\install.bat` → デスクトップ配置・自動起動
+   - Alt+Tab・Alt+F4 などのキー制限、USB プリンターへの直接印刷つき
+   - 終了は管理画面の「AIソフトを閉じる」
 
 ## 注意
 
-- `.env`（APIキー）・`logs/`・`debug.xlsx`・`ratings.json` は **Git に入れないでください**（`.gitignore` で除外済み）。ログにはお客様の入力したお題や絵が含まれます。
-- 子どもの音声・入力を扱うため、Gemini API は有料枠の利用を推奨します（詳しくは `docs/LICENSE_AUDIT.md`）。
+- `.env`・`data/`・`logs/`・`debug.xlsx` は **Git に入れないでください**（`.gitignore` で除外済み）。お客様が入力したお題や絵が含まれます
+- 子どもの音声・入力を扱うため、Gemini API は有料枠の利用を推奨します（`docs/LICENSE_AUDIT.md`）
+- マイクは https の URL でないと使えません

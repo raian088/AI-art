@@ -298,6 +298,19 @@
         <label for="envPin">管理画面の暗証番号（数字4桁）</label>
         <input type="text" id="envPin" class="text-input" inputmode="numeric" maxlength="4" autocomplete="off">
       </div>
+      <div id="envServerFields" style="display:none;">
+        <div class="field">
+          <label for="envAppUser">ログインID（Windows PC の Chrome でログインするとき）</label>
+          <input type="text" id="envAppUser" class="text-input" autocomplete="off" spellcheck="false">
+        </div>
+        <div class="field">
+          <label for="envAppPassword">ログインパスワード（8文字以上）</label>
+          <input type="password" id="envAppPassword" class="text-input" autocomplete="new-password"
+                 placeholder="変更するときだけ入力">
+          <div class="hint">変更しても、ログイン済みの PC はそのまま使えます</div>
+        </div>
+      </div>
+      <div id="envDesktopFields">
       <div class="field">
         <label for="envLaunchMode">起動方法</label>
         <select id="envLaunchMode">
@@ -319,6 +332,7 @@
         <input type="text" id="envChromePath" class="text-input" spellcheck="false" placeholder="自動で探します">
         <div id="envChromeHint" class="hint"></div>
       </div>
+      </div>
       <button id="envSaveBtn" class="btn btn-primary" type="button" onclick="saveEnv()">💾 環境設定を保存</button>
       <div id="envPathHint" class="hint" style="margin-top:8px;"></div>
     </div>
@@ -335,7 +349,7 @@
     <div class="card-title">🛠 操作</div>
     <div style="display:grid;gap:8px;">
       <button class="btn btn-secondary" onclick="openDebug()">🔍 デバッグブラウザを開く</button>
-      <button class="btn btn-danger" onclick="shutdownApp()">⏹ AIソフトを閉じる</button>
+      <button class="btn btn-danger" id="shutdownBtn" onclick="shutdownApp()">⏹ AIソフトを閉じる</button>
     </div>
   </div>
 
@@ -405,6 +419,11 @@
     // ===== 設定を画面に反映 =====
     function applySettings(s) {
       settings = s;
+      if (s.server_mode && !SERVER_MODE) {
+        SERVER_MODE = true;
+        const b = document.getElementById('shutdownBtn');
+        if (b) b.textContent = '⏹ 画面の閉じ方（Alt+F4）';
+      }
       document.getElementById('bgmEnabled').checked = s.bgm_enabled !== false;
       document.getElementById('bgmVolume').value = s.bgm_volume ?? 80;
       document.getElementById('bgmVolumeVal').textContent = (s.bgm_volume ?? 80) + '%';
@@ -585,7 +604,9 @@
       catch (e) { flash('❌ ' + e.message); }
     }
 
+    let SERVER_MODE = false;
     async function shutdownApp() {
+      if (SERVER_MODE) { flash('画面を閉じるときはキーボードの Alt+F4 を押してください'); return; }
       if (!confirm('AIソフトを終了しますか？')) return;
       try { await api().shutdown(); } catch (_) {}
     }
@@ -622,6 +643,12 @@
         ch.textContent = e.chrome_found ? '検出: ' + e.chrome_found : '⚠ Chrome が見つかりません';
         ch.className = 'hint ' + (e.chrome_found ? '' : 'ng');
         document.getElementById('envPathHint').textContent = '保存先: ' + e.env_path;
+        document.getElementById('envServerFields').style.display = e.server_mode ? '' : 'none';
+        document.getElementById('envDesktopFields').style.display = e.server_mode ? 'none' : '';
+        if (e.server_mode) {
+          document.getElementById('envAppUser').value = e.app_user || '';
+          document.getElementById('envAppPassword').value = '';
+        }
       } catch (err) {
         locked.textContent = '⚠ ' + err.message;
       }
@@ -642,14 +669,18 @@
     async function saveEnv() {
       const pin = document.getElementById('envPin').value.trim();
       if (!/^[0-9]{4}$/.test(pin)) { flash('⚠ 暗証番号は数字4桁にしてください'); return; }
-      const body = {
-        api_key: document.getElementById('envApiKey').value.trim(),
-        admin_pin: pin,
-        launch_mode: document.getElementById('envLaunchMode').value,
-        kiosk_block_keys: document.getElementById('envBlockKeys').checked,
-        fullscreen: document.getElementById('envFullscreen').checked,
-        chrome_path: document.getElementById('envChromePath').value.trim(),
-      };
+      const body = { api_key: document.getElementById('envApiKey').value.trim(), admin_pin: pin };
+      if (envLoaded && envLoaded.server_mode) {
+        body.app_user = document.getElementById('envAppUser').value.trim();
+        body.app_password = document.getElementById('envAppPassword').value;
+      } else {
+        Object.assign(body, {
+          launch_mode: document.getElementById('envLaunchMode').value,
+          kiosk_block_keys: document.getElementById('envBlockKeys').checked,
+          fullscreen: document.getElementById('envFullscreen').checked,
+          chrome_path: document.getElementById('envChromePath').value.trim(),
+        });
+      }
       const btn = document.getElementById('envSaveBtn');
       btn.disabled = true; btn.textContent = '保存中...';
       try {
